@@ -1,6 +1,6 @@
 # Niak fork — Android TV video/channel hiding
 
-**Status: Cobalt source integrated; 9 representative Node tests passing; Android APK/device validation not yet performed.**
+**Status: Cobalt source integrated; 21 targeted Node checks and 10 Java updater tests green; Android APK/device validation not yet performed.**
 
 The one active implementation is:
 
@@ -8,9 +8,9 @@ The one active implementation is:
 - `cobalt/shell/BUILD.gn`: declares this script as an input for `embed_polyfilled_javascript`
 - `cobalt/shell/browser/shell.cc`: registers packaged JavaScript at document start
 - `tests/niak_tizentube_filters.test.cjs`: contract tests for YouTube TV tile menus, local storage, filtering and dialogs
-- `.github/workflows/niak-cobalt-filters.yml`: 5-minute sparse-checkout CI (no Cobalt build)
+- `.github/workflows/niak-cobalt-filters.yml`: sparse-checkout CI for JS/GN source contracts plus 10 real Java downloader JUnit tests (no native Cobalt APK build)
 
-A separate experimental recommendation script and redundant test workflow were removed to avoid conflicting JSON hooks and duplicate context menu entries. Only the implementation above is shipped.
+A separate experimental recommendation script and redundant test workflow were removed to avoid conflicting JSON hooks and duplicate context menu entries. Only the implementation above is shipped. The source now also restricts this script to YouTube HTTPS origins and avoids scanning non-recommendation JSON responses.
 
 ## Features and controls
 
