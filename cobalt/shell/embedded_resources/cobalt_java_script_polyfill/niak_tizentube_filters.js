@@ -290,7 +290,7 @@
       ] } }
     } };
   }
-  function showManage() {
+  function showManage(update) {
     var state = readState(), list = [
       compactLink(text.clear + ' (' + state.hiddenVideos.length + ')', 'NIAK_CLEAR_VIDEOS'),
       compactLink(text.clearChannels + ' (' + state.blockedChannels.length + ')', 'NIAK_CLEAR_CHANNELS')
@@ -302,7 +302,7 @@
     if (!state.blockedChannels.length) list.push({ overlayMessageRenderer: {
       message: { simpleText: text.none }
     } });
-    resolveUi({ openPopupAction: { popupType: 'MODAL', uniqueId: 'niak-filter-settings',
+    var cmd = { openPopupAction: { popupType: 'MODAL', uniqueId: 'niak-filter-settings',
       popup: { overlaySectionRenderer: { overlay: { overlayTwoPanelRenderer: {
         actionPanel: { overlayPanelRenderer: {
           header: { overlayPanelHeaderRenderer: { title: { simpleText: text.heading } } },
@@ -310,7 +310,12 @@
         } },
         backButton: { buttonRenderer: { command: { signalAction: { signal: 'POPUP_BACK' } } } }
       } }, dismissalCommand: { signalAction: { signal: 'POPUP_BACK' } } } }
-    } });
+    } };
+    if (update) {
+      cmd.openPopupAction.shouldMatchUniqueId = true;
+      cmd.openPopupAction.updateAction = true;
+    }
+    resolveUi(cmd);
   }
   function sendYoutubeFeedback(panel, index) {
     if (!panel) return;
@@ -361,15 +366,15 @@
     } else if (action === 'NIAK_BLOCK_CHANNEL') {
       if (parameters && blockChannel(parameters.channel)) toast(text.blocked);
       else toast(text.unavailable);
-    } else if (action === 'NIAK_MANAGE_FILTERS') showManage();
+    } else if (action === 'NIAK_MANAGE_FILTERS') showManage(false);
     else if (action === 'NIAK_CLEAR_VIDEOS') {
-      var s = readState(); s.hiddenVideos = []; writeState(s); toast(text.restored); showManage();
+      var s = readState(); s.hiddenVideos = []; writeState(s); toast(text.restored); showManage(true);
     } else if (action === 'NIAK_CLEAR_CHANNELS') {
-      var s2 = readState(); s2.blockedChannels = []; s2.channelNames = {}; writeState(s2); toast(text.restored); showManage();
+      var s2 = readState(); s2.blockedChannels = []; s2.channelNames = {}; writeState(s2); toast(text.restored); showManage(true);
     } else if (action === 'NIAK_UNBLOCK_CHANNEL') {
       var s3 = readState(), k = parameters && parameters.key;
       s3.blockedChannels = s3.blockedChannels.filter(function (v) { return v !== k; });
-      delete s3.channelNames[k]; writeState(s3); toast(text.restored); showManage();
+      delete s3.channelNames[k]; writeState(s3); toast(text.restored); showManage(true);
     }
   }
   function installCommandPatch() {
