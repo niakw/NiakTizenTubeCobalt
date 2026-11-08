@@ -1,13 +1,8 @@
 name: Niak Cobalt — APK builder
 
+# Full native builds use a fresh hosted VM unless a persistent cache exists.
+# Don't automatically start a cold 47k-task rebuild on every CI correction.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/niak-apk-build.yml'
-      # A GN dependency repair must rebuild the actual APK, rather than
-      # passing source-only checks without exercising gn gen --check.
-      - 'third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/BUILD.gn'
   workflow_dispatch:
     inputs:
       architecture:
@@ -50,7 +45,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   native-apk:
-    if: github.event_name == 'push' || inputs.compile
+    if: inputs.compile
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -91,6 +86,36 @@ jobs:
           fetch-depth: 1
           filter: blob:none
           persist-credentials: false
+      - name: Fast Android resource preflight
+        working-directory: cobalt/src
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/niak-preflight-android-resources.py
+      - name: Install content-addressed sccache compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Connect sccache to GitHub Actions cache storage
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Require reusable compiler cache before expensive sync
+        shell: bash
+        env:
+          SCCACHE_GHA_ENABLED: 'true'
+          SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
+        run: |
+          set -euo pipefail
+          command -v sccache
+          sccache --version
+          if [[ -z "${ACTIONS_RESULTS_URL:-}" || -z "${ACTIONS_RUNTIME_TOKEN:-}" ]]; then
+            echo "::error::No GitHub cache backend credentials. Aborting before expensive gclient sync."
+            exit 1
+          fi
+          echo "Content-addressed compiler cache enabled (free GitHub default quota; no storage increase requested)"
       - name: Get public depot_tools
         shell: bash
         run: |
@@ -159,11 +184,25 @@ jobs:
         shell: bash
         env:
           ARCH: ${{ inputs.architecture || 'arm64' }}
+          SCCACHE_GHA_ENABLED: 'true'
+          SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
         run: |
           set -euo pipefail
           export PATH="$GITHUB_WORKSPACE/cobalt/depot_tools:$PATH"
-          cobalt/build/gn.py -p "android-$ARCH" -c qa --no-rbe
+          # GN uses cc_wrapper=sccache; unchanged objects are keyed by compiler
+          # inputs and can be reused by future ephemeral GitHub runners.
+          cobalt/build/gn.py -p "android-$ARCH" -c qa --no-rbe --use-sccache
           autoninja -j 4 -C "out/android-$ARCH"_"qa" cobalt_apk
+      - name: Report compiler cache hit/miss statistics even after build failure
+        if: always()
+        shell: bash
+        env:
+          SCCACHE_GHA_ENABLED: 'true'
+          SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
+        run: |
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats || true
+          fi
       - name: Verify actual generated APK
         shell: bash
         env:
