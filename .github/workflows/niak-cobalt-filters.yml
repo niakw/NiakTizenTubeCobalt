@@ -23,6 +23,8 @@ on:
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java'
       - 'cobalt/android/apk/app/src/test/java/dev/cobalt/coat/UpdateDownloaderTest.java'
       - 'cobalt/shell/android/BUILD.gn'
+      - 'cobalt/shell/android/java/res/**'
+      - 'scripts/niak-preflight-android-resources.py'
       - 'cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2'
       - 'cobalt/shell/android/java/res/values*/update_strings.xml'
       - '.github/workflows/niak-cobalt-filters.yml'
@@ -46,6 +48,8 @@ on:
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java'
       - 'cobalt/android/apk/app/src/test/java/dev/cobalt/coat/UpdateDownloaderTest.java'
       - 'cobalt/shell/android/BUILD.gn'
+      - 'cobalt/shell/android/java/res/**'
+      - 'scripts/niak-preflight-android-resources.py'
       - 'cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2'
       - 'cobalt/shell/android/java/res/values*/update_strings.xml'
   workflow_dispatch:
@@ -74,6 +78,8 @@ jobs:
             cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java
             cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java
             cobalt/shell/android/BUILD.gn
+            cobalt/shell/android/java/res
+            scripts/niak-preflight-android-resources.py
             cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
             starboard/android/shared/video_render_algorithm_android.cc
             third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.cc
@@ -89,6 +95,8 @@ jobs:
           node --check cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js
           node --check cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_security_guard.js
           node --test tests/*.test.cjs
+      - name: Preflight Android resources against GN source declarations
+        run: python3 scripts/niak-preflight-android-resources.py
       - name: Validate GN embedding header inputs
         run: |
           python3 cobalt/build/generate_data_header.py CobaltJavaScriptPolyfill /tmp/niak-embedded-js.h cobalt/shell/embedded_resources/cobalt_java_script_polyfill
