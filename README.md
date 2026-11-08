@@ -14,6 +14,12 @@ Cobalt is a lightweight, cross-platform application container and runtime for HT
 
 </details>
 
+## Niak fork: local video and channel hiding
+
+This fork adds Cobalt-embedded recommendation controls for Android TV: long-press a video to **hide it locally**, **block its channel**, or **manage blocked channels and hidden videos** with the remote. The JavaScript is bundled into the Cobalt binary at build time, not fetched from a second website. These preferences are local to this TV; they are not Google account feedback.
+
+**Status:** source integrated; Node checks passed; **fork APK and real-device validation are still pending**. The official APK release button below does **not** contain this fork's changes. See [implementation, controls, tests, and limits](docs/NIAK_RECOMMENDATION_CONTROLS.md).
+
 ## ✨ Features
 
 - 🛑 **Ad Blocker**: Enjoy your favourite streaming website without interruptions from ads.
