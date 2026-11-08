@@ -24,6 +24,8 @@ function boot(hostname = 'www.youtube.com') {
     _yttv: { live: { instance: { resolveCommand: (cmd) => { outgoing.push(cmd); return false; } } } }
   };
   const context = vm.createContext({ window, navigator: { language: 'fr-FR' }, console });
+  // In a browser window.JSON === JSON; the vm fixture must mirror that.
+  window.JSON = vm.runInContext('JSON', context);
   vm.runInContext(script, context, { filename: 'niak_tizentube_filters.js' });
   ticks.forEach((fn) => fn());
   return {
