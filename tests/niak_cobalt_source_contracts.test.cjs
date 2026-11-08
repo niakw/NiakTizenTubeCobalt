@@ -7,13 +7,22 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 function read(file) { return fs.readFileSync(path.join(root, file), 'utf8'); }
 
-test('Cobalt bundles exactly one Niak recommendation runtime', () => {
+test('Cobalt bundles one local filter, one security guard and one pinned main userscript', () => {
   const build = read('cobalt/shell/BUILD.gn');
   const scripts = build.match(/embedded_resources\/cobalt_java_script_polyfill\/niak_[^"\n]+\.js/g) || [];
   assert.deepEqual(scripts, [
-    'embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js'
+    'embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js',
+    'embedded_resources/cobalt_java_script_polyfill/niak_tizentube_security_guard.js',
+    'embedded_resources/cobalt_java_script_polyfill/niak_upstream_tizentube.js'
   ]);
   assert.match(build, /"embed_polyfilled_javascript"/);
+  const shell = read('cobalt/shell/browser/shell.cc');
+  assert.match(shell, /file_name == "niak_tizentube_security_guard\.js"/);
+  assert.match(shell, /file_name == "niak_upstream_tizentube\.js"/);
+  const pinned = read('scripts/niak-embed-tizentube.sh');
+  assert.match(pinned, /f99945a84ff767bf14ad8c1146e8e3fd49a3d628/);
+  assert.match(pinned, /9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75/);
+  assert.match(pinned, /actual.*SCRIPT_SHA256/);
 });
 
 test('Niak source injection is scoped to YouTube HTTPS origins', () => {
