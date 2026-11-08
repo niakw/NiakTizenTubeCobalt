@@ -57,7 +57,7 @@ test('Starboard first frame can render before audio has advanced', () => {
 test('The updater is a compiled Android activity with verified HTTPS APKs', () => {
   const build = read('cobalt/android/BUILD.gn');
   const mainJava = build.split('android_library("cobalt_main_java")')[1]
-    .split('if (!use_evergreen)')[0];
+    .split('  sources = [')[1].split('  ]')[0];
   for (const filename of ['CobaltUpdateActivity.java', 'UpdateDownloader.java']) {
     assert.ok(mainJava.includes('apk/app/src/main/java/dev/cobalt/coat/' + filename),
       filename + ' must be compiled into the actual APK Java library');
