@@ -42,6 +42,12 @@ Filtering applies to recommendation shelves, grids, and continuations after the 
 
 [Read implementation and test limitations](docs/NIAK_RECOMMENDATION_CONTROLS.md) · [View Niak video filters CI](https://github.com/niakw/TizenTubeCobalt/actions/workflows/niak-cobalt-filters.yml)
 
+## Niak fork — APK build status
+
+The fork has a [native Android APK build workflow](https://github.com/niakw/TizenTubeCobalt/actions/workflows/niak-apk-build.yml) for ARM/ARM64, with binary integrity and signing verification. **A successful Node/Java check is not an APK.** Do not use the official upstream download button as a substitute for a fork build.
+
+The main TizenTube userscript is generated from a [pinned Git commit and verified SHA-256](docs/NIAK_APK_BUILD_AND_SECURITY.md) before GN compilation, instead of executing the mutable CDN version. An Android test APK may have a different debug signature from the official app and may require uninstalling the existing application. No production release will be represented as complete until a genuine signed APK is verified.
+
 ## ⬇️ Download
 
 Get the latest release for your platform:
