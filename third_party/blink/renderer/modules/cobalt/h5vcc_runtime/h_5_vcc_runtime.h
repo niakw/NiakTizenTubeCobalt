@@ -81,6 +81,9 @@ class MODULES_EXPORT H5vccRuntime final
       deep_link_receiver_;
 
   String initial_deep_link_;
+  // Do not consume the OS deep link just because a transient startup document
+  // constructs h5vcc.runtime. Only the actual JS accessor can consume it.
+  bool initial_deep_link_fetched_ = false;
 };
 
 }  // namespace blink
