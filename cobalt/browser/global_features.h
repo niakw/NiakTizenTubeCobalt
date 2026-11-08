@@ -91,6 +91,11 @@ class GlobalFeatures {
   void SetSettings(std::string_view key, const SettingValue& value);
   void ClearSetting(std::string_view key);
 
+  // Persisted across app restarts to avoid repeatedly replacing YouTube TV's
+  // chosen user-agent profile on devices that need compatibility spoofing.
+  static constexpr char kUserAgentOverridePrefName[] =
+      "user_agent_override";
+
  private:
   friend class base::NoDestructor<GlobalFeatures>;
 
@@ -103,6 +108,8 @@ class GlobalFeatures {
   void CreateMetricsServices();
   // Initialize a PrefService instance for local state for Metrics services.
   void CreateMetricsLocalState();
+  // Rehydrate the user-agent preference only after the pref store is ready.
+  void RestorePersistedSettings();
   // Initialize a PrefService instance for local state.
   void CreateLocalState();
 
