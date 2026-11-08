@@ -93,3 +93,11 @@ test('A transient Blink document cannot consume the initial deep link on constru
   assert.match(getter, /initial_deep_link_fetched_ = true;/);
   assert.match(header, /initial_deep_link_fetched_ = false;/);
 });
+
+test('TizenTube update bridge reports Android acceptance rather than unconditional success', () => {
+  const src = read('third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/h_5_vcc_tizen_tube.cc');
+  const method = src.split('bool H5vccTizenTube::InstallAppFromURL(')[1]
+    .split('void H5vccTizenTube::SetFrameRate')[0];
+  assert.match(method, /return bridge->InstallAppFromURL\(env, url\.Utf8\(\)\.data\(\)\);/);
+  assert.doesNotMatch(method, /bridge->InstallAppFromURL\([^;]+;\s*return true;/);
+});
