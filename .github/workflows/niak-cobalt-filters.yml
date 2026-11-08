@@ -14,6 +14,7 @@ on:
       - 'starboard/android/shared/video_render_algorithm_android.cc'
       - 'third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.cc'
       - 'third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.h'
+      - 'third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/h_5_vcc_tizen_tube.cc'
       - 'cobalt/android/BUILD.gn'
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java'
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java'
@@ -34,6 +35,7 @@ on:
       - 'starboard/android/shared/video_render_algorithm_android.cc'
       - 'third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.cc'
       - 'third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.h'
+      - 'third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/h_5_vcc_tizen_tube.cc'
       - 'cobalt/android/BUILD.gn'
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java'
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java'
@@ -72,6 +74,7 @@ jobs:
             starboard/android/shared/video_render_algorithm_android.cc
             third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.cc
             third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.h
+            third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/h_5_vcc_tizen_tube.cc
             cobalt/shell/embedded_resources/cobalt_java_script_polyfill
             tests
           sparse-checkout-cone-mode: false
