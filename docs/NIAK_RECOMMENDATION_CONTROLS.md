@@ -1,69 +1,52 @@
-# Niak fork — Android TV recommendation controls
+# Niak fork — Android TV video/channel hiding
 
-Status: **source integrated in Cobalt; runtime APK not yet built or verified on a TV**.
+**Status: Cobalt source integrated; 9 representative Node tests passing; Android APK/device validation not yet performed.**
 
-This fork embeds an additional, origin-gated document-start script in Cobalt:
-\`cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_recommendation_controls.js\`.
+The one active implementation is:
 
-Cobalt already uses \`cobalt/shell:embed_polyfilled_javascript\` to embed all scripts
-in that directory; \`Shell::RegisterInjectedJavaScript()\` installs them at
-document start. The script runs only when the web page host is
-\`www.youtube.com\` or \`m.youtube.com\`.
+- `cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js`
+- `cobalt/shell/BUILD.gn`: declares this script as an input for `embed_polyfilled_javascript`
+- `cobalt/shell/browser/shell.cc`: registers packaged JavaScript at document start
+- `tests/niak_tizentube_filters.test.cjs`: contract tests for YouTube TV tile menus, local storage, filtering and dialogs
+- `.github/workflows/niak-cobalt-filters.yml`: 5-minute sparse-checkout CI (no Cobalt build)
 
-## Features
+A separate experimental recommendation script and redundant test workflow were removed to avoid conflicting JSON hooks and duplicate context menu entries. Only the implementation above is shipped.
 
-On a YouTube TV recommendation tile, **long-press OK** to access:
+## Features and controls
 
-- **Pas intéressé (masquer)** — hide the selected video on this TV.
-- **Ne plus recommander cette chaîne (local)** — locally suppress recommendations from that channel.
-- **Bloquer cette chaîne** — same local channel block, with a separate explicit action.
-- **Gérer les vidéos et chaînes masquées** — a remote-friendly dialog to clear the list of hidden videos or unblock individual channels.
+With a video tile selected on the YouTube TV home page, **hold OK** for the long-press context menu:
 
-The script supports the two current YouTube TV response shapes:
-\`tileRenderer\` and \`lockupViewModel\`. It filters recommendation grids,
-horizontal shelves and continuation lists, while deliberately preserving
-library, history and playlist entries. It augments existing long-press menus
-rather than replacing them. To see the filtered results after choosing an action,
-refresh or revisit the recommendations.
+| UI control | Behavior |
+| --- | --- |
+| **Pas intéressé / Not interested** | Hide the selected video locally; attempt Google feedback only when a valid engagement panel was available |
+| **Ne pas recommander cette chaîne / Don't recommend this channel** | Block its video recommendations locally; optionally submit feedback using YouTube's panel tokens |
+| **Bloquer cette chaîne / Block channel** | Block locally by stable channel ID; fall back to channel name |
+| **Gérer les vidéos et chaînes masquées / Manage hidden videos and channels** | Restore all hidden videos, unblock all channels or unblock channels individually |
 
-Lists live in YouTube TV's **localStorage on the device** under
-\`niak.tizentube.recommendations.v1\`. The saved data contains video IDs and
-channel IDs/names only; hidden videos are capped at 1,000 and blocked
-channels at 500. This is *not* a Google account preference and does
-not send \`Not interested\` feedback to YouTube servers.
+Preferences are saved in YouTube TV localStorage on that device under `niak-tizentube-filters-v1`; hidden video IDs are capped at 1,000 and channel entries at 250. Labels are available in French and English. No separate app or JavaScript addon install is required **once an APK has been built from this fork**.
 
-## Integration and limitations
+The script augments existing long-press menu commands where present and synthesizes a minimal menu if a supported tile lacks one. Filtering is applied when YouTube TV parses a refreshed recommendation grid/shelf/continuation. Already-rendered items may remain visible until the next refresh. History, personal library and playlists are explicitly exempt.
 
-The enhancement is embedded in the Cobalt application at native build time:
-it does **not** require installing another standalone APK or browser extension.
-It coexists with TizenTube's separately distributed userscript, which still
-supplies ad blocking, SponsorBlock and most other UI functions.
+## Differences from upstream PR #720
 
-This is a **local port inspired by
-[reisxd/TizenTube PR #720](https://github.com/reisxd/TizenTube/pull/720)**,
-rather than an unmodified merge of that PR (whose files belong to a different
-repository). The original PR can also submit YouTube feedback when tokens exist;
-the embedded Cobalt port intentionally does not claim that remote feature.
+[reisxd/TizenTube PR #720](https://github.com/reisxd/TizenTube/pull/720) modifies a **different repository**, the separately distributed TizenTube JavaScript userscript. This fork implements similar behavior within Cobalt's embedded document-start JavaScript, without merging or replacing that upstream project.
 
-The existing official APKs linked from this repository's README are **not
-built from this fork** and will not contain this code. Source tests cannot
-prove the Cobalt/Android TV runtime integration or real remote-controller
-behavior; those checks still need a signed fork APK and a device test.
+The attempt to send YouTube feedback uses the official runtime's `KabukiInnerTubeClient` when an engagement panel/token is available. **Feedback success and the "Tell us why" reasons dialog are not guaranteed**; local filtering works without those endpoints. A blocked channel in this fork is not necessarily a block in your Google account.
 
-## Tests
+## How to validate
 
-\`\`\`sh
-node --check cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_recommendation_controls.js
-node --test cobalt/shell/tests/niak_recommendation_controls.test.cjs
-\`\`\`
+The lightweight CI runs:
 
-A sparse GitHub Actions check runs these tests without cloning or compiling
-the entire Chromium/Cobalt tree.
+```sh
+node --check cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js
+node --test tests/niak_tizentube_filters.test.cjs
+python3 cobalt/build/generate_data_header.py CobaltJavaScriptPolyfill /tmp/niak-embedded-js.h cobalt/shell/embedded_resources/cobalt_java_script_polyfill
+```
 
-## Further work
+It verifies syntax, menu structure, persistence, exemptions, channel/video blocking, modal management and that Node tests are not accidentally embedded in the APK. The CI is intentionally light: it does not compile the native Cobalt runtime.
 
-- Qualify menu rendering, focus and remote BACK behavior on the actual TV.
-- Verify script coexistence with the current released TizenTube userscript.
-- Build and sign a fork-specific Cobalt APK, then distribute it separately.
-- Consider upstream's native YouTube feedback integration if it can be made
-  reliable and tested on the target YouTube TV client.
+[Niak Cobalt video filters workflow](https://github.com/niakw/TizenTubeCobalt/actions/workflows/niak-cobalt-filters.yml)
+
+For final device qualification, build **this fork** as an Android TV APK, sign it, install it on the TV, then test long-press, menu focus/Back navigation, both tile and lockup formats, all four actions, persistence after restart, and coexistence with SponsorBlock/ad blocking. **Do not use the upstream release APK to test these fork changes**: it does not contain them.
+
+The runtime still depends on the separately distributed TizenTube userscript for its other features; the source integration here does not resolve upstream's remote-userscript integrity issue.
