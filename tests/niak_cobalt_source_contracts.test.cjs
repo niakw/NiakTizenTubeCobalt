@@ -53,3 +53,29 @@ test('Starboard first frame can render before audio has advanced', () => {
   assert.match(video, /#else\s*\/\/ Paint the first decoded frame[\s\S]*?release_frames_after_audio_starts_\(true\)/);
   assert.match(video, /if \(first_frame_released_ &&/);
 });
+
+test('The updater is a compiled Android activity with verified HTTPS APKs', () => {
+  const build = read('cobalt/android/BUILD.gn');
+  const mainJava = build.split('android_library("cobalt_main_java")')[1]
+    .split('if (!use_evergreen)')[0];
+  for (const filename of ['CobaltUpdateActivity.java', 'UpdateDownloader.java']) {
+    assert.ok(mainJava.includes('apk/app/src/main/java/dev/cobalt/coat/' + filename),
+      filename + ' must be compiled into the actual APK Java library');
+  }
+  const downloader = read('cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java');
+  assert.match(downloader, /"https"\.equals\(url\.getProtocol\(\)\)/);
+  assert.match(downloader, /static final long MAX_BYTES = 512L \* 1024 \* 1024/);
+  assert.match(downloader, /MAX_ATTEMPTS = 3/);
+  const activity = read('cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java');
+  assert.match(activity, /current\.equals\(downloaded\)/);
+  assert.match(activity, /getPackageArchiveInfo/);
+  assert.match(activity, /canRequestPackageInstalls/);
+  const bridge = read('cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java');
+  assert.match(bridge, /UpdateDownloader\.validateUrl\(url\)/);
+  assert.match(bridge, /new Intent\(activity, CobaltUpdateActivity\.class\)/);
+  const manifest = read('cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2');
+  assert.match(manifest, /<activity android:name="dev\.cobalt\.coat\.CobaltUpdateActivity"/);
+  assert.match(manifest, /android:exported="false"/);
+  const resources = read('cobalt/shell/android/BUILD.gn');
+  assert.match(resources, /java\/res\/values\/update_strings\.xml/);
+});
