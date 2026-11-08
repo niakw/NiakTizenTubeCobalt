@@ -1,4 +1,4 @@
-name: Niak Cobalt video filters
+name: Niak Cobalt targeted checks
 
 on:
   push:
@@ -12,6 +12,14 @@ on:
       - 'cobalt/browser/global_features*'
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java'
       - 'starboard/android/shared/video_render_algorithm_android.cc'
+      - 'cobalt/android/BUILD.gn'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java'
+      - 'cobalt/android/apk/app/src/test/java/dev/cobalt/coat/UpdateDownloaderTest.java'
+      - 'cobalt/shell/android/BUILD.gn'
+      - 'cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2'
+      - 'cobalt/shell/android/java/res/values*/update_strings.xml'
       - '.github/workflows/niak-cobalt-filters.yml'
   pull_request:
     paths:
@@ -22,6 +30,14 @@ on:
       - 'cobalt/browser/global_features*'
       - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java'
       - 'starboard/android/shared/video_render_algorithm_android.cc'
+      - 'cobalt/android/BUILD.gn'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java'
+      - 'cobalt/android/apk/app/src/test/java/dev/cobalt/coat/UpdateDownloaderTest.java'
+      - 'cobalt/shell/android/BUILD.gn'
+      - 'cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2'
+      - 'cobalt/shell/android/java/res/values*/update_strings.xml'
   workflow_dispatch:
 
 permissions:
@@ -42,7 +58,13 @@ jobs:
             cobalt/browser/global_features.cc
             cobalt/browser/global_features.h
             cobalt/browser/global_features_unittest.cc
+            cobalt/android/BUILD.gn
+            cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
             cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+            cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltUpdateActivity.java
+            cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java
+            cobalt/shell/android/BUILD.gn
+            cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
             starboard/android/shared/video_render_algorithm_android.cc
             cobalt/shell/embedded_resources/cobalt_java_script_polyfill
             tests
@@ -59,3 +81,27 @@ jobs:
             echo 'Node tests must not be embedded in APK'
             exit 1
           fi
+
+  updater-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java
+            cobalt/android/apk/app/src/test/java/dev/cobalt/coat/UpdateDownloaderTest.java
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compile and run all ten upstream downloader JUnit tests
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/classes"
+          curl --fail --silent --show-error --location --retry 2             https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar             --output "${RUNNER_TEMP}/junit.jar"
+          curl --fail --silent --show-error --location --retry 2             https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar             --output "${RUNNER_TEMP}/hamcrest.jar"
+          javac -d "${RUNNER_TEMP}/classes"             -cp "${RUNNER_TEMP}/junit.jar:${RUNNER_TEMP}/hamcrest.jar"             cobalt/android/apk/app/src/main/java/dev/cobalt/coat/UpdateDownloader.java             cobalt/android/apk/app/src/test/java/dev/cobalt/coat/UpdateDownloaderTest.java
+          java -cp "${RUNNER_TEMP}/classes:${RUNNER_TEMP}/junit.jar:${RUNNER_TEMP}/hamcrest.jar"             org.junit.runner.JUnitCore dev.cobalt.coat.UpdateDownloaderTest
