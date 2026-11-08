@@ -238,3 +238,41 @@ test('Explicit TizenTube ad-block off preserves ad slots', () => {
   assert.equal(itemsOf(result).length, 2);
   assert.equal(sections.some((entry) => !!entry.adSlotRenderer), true);
 });
+
+test('Live player ad markers are removed without touching actual streaming data', () => {
+  const app = boot();
+  const response = {
+    videoDetails: { videoId: VIDEO, isLiveContent: true },
+    adPlacements: [{adPlacementRenderer: {config: {offsetStartMilliseconds: 60000}}}],
+    adSlots: [{adSlotRenderer: {slotId: 'live-preroll'}}],
+    playerAds: {playerLegacyDesktopWatchAdsRenderer: {}},
+    streamingData: {
+      adaptiveFormats: [{itag: 140, mimeType: 'audio/mp4', url: 'https://stream.example/audio'}],
+      expiresInSeconds: '21540'
+    },
+    playbackContext: {contentPlaybackContext: {vis: 0}}
+  };
+  const output = app.parse(response);
+  assert.deepEqual(Array.from(output.adPlacements), []);
+  assert.deepEqual(Array.from(output.adSlots), []);
+  assert.equal(output.playerAds, false);
+  assert.equal(output.streamingData.adaptiveFormats[0].itag, 140);
+  assert.equal(output.streamingData.adaptiveFormats[0].url, 'https://stream.example/audio');
+  assert.equal(output.playbackContext.contentPlaybackContext.vis, 0);
+});
+
+test('Live ad markers remain when the user disables the ad blocker', () => {
+  const app = boot();
+  app.storage.set('ytaf-configuration', JSON.stringify({enableAdBlock: false}));
+  const response = {
+    adPlacements: [{adPlacementRenderer: {}}],
+    adSlots: [{adSlotRenderer: {}}],
+    playerAds: true,
+    streamingData: {formats: [{itag: 18}]}
+  };
+  const output = app.parse(response);
+  assert.equal(output.adPlacements.length, 1);
+  assert.equal(output.adSlots.length, 1);
+  assert.equal(output.playerAds, true);
+  assert.equal(output.streamingData.formats[0].itag, 18);
+});
