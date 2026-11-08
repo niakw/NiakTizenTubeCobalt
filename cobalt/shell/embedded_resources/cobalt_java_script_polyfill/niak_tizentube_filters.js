@@ -196,6 +196,9 @@
   }
   function decorateMenu(item) {
     if (!isVideo(item) || !videoId(item)) return;
+    // Capture the engagement panel before synthesizing a long-press menu;
+    // some tiles expose a panel endpoint but do not have a menu yet.
+    var panel = feedbackPanel(item);
     var items = menuFor(item);
     if (!items) return;
     if (items.some(function (m) {
@@ -203,7 +206,7 @@
       return c && c.playlistEditEndpoint && c.playlistEditEndpoint.customAction &&
         c.playlistEditEndpoint.customAction.action === 'NIAK_NOT_INTERESTED';
     })) return;
-    var channel = channelInfo(item), panel = feedbackPanel(item);
+    var channel = channelInfo(item);
     items.push(serviceItem(text.hide, 'NIAK_NOT_INTERESTED', { videoId: videoId(item), panel: panel }));
     if (channel) {
       items.push(serviceItem(text.dont, 'NIAK_DONT_RECOMMEND', { channel: channel, panel: panel }));
