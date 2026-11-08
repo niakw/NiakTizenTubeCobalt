@@ -44,6 +44,7 @@ namespace cobalt {
 GlobalFeatures::GlobalFeatures() {
   CreateExperimentConfig();
   CreateMetricsServices();
+  RestorePersistedSettings();
   experiment_config_manager_ = std::make_unique<ExperimentConfigManager>(
       experiment_config_.get(), metrics_local_state_.get());
 }
@@ -120,6 +121,12 @@ void GlobalFeatures::SetSettings(std::string_view key,
     }();
   }
 
+  if (key == kUserAgentOverridePrefName && metrics_local_state_) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (const auto* user_agent = std::get_if<std::string>(&value)) {
+      metrics_local_state_->SetString(kUserAgentOverridePrefName, *user_agent);
+    }
+  }
   base::HangWatcher::UpdateConfiguration();
 }
 
@@ -129,6 +136,10 @@ void GlobalFeatures::ClearSetting(std::string_view key) {
     settings_.erase(key);
   }
 
+  if (key == kUserAgentOverridePrefName && metrics_local_state_) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    metrics_local_state_->ClearPref(kUserAgentOverridePrefName);
+  }
   base::HangWatcher::UpdateConfiguration();
 }
 
@@ -174,6 +185,7 @@ void GlobalFeatures::CreateMetricsLocalState() {
   // call, etc., this is the setting that's overridden).
   pref_registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled,
                                      false);
+  pref_registry->RegisterStringPref(kUserAgentOverridePrefName, std::string());
   base::FilePath path =
       GetPrefFilePath(kMetricsConfigFilename, "metrics config");
 
@@ -184,6 +196,20 @@ void GlobalFeatures::CreateMetricsLocalState() {
       base::MakeRefCounted<JsonPrefStore>(path));
 
   metrics_local_state_ = pref_service_factory.Create(std::move(pref_registry));
+}
+
+void GlobalFeatures::RestorePersistedSettings() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(metrics_local_state_);
+
+  const std::string stored =
+      metrics_local_state_->GetString(kUserAgentOverridePrefName);
+  if (stored.empty()) {
+    return;
+  }
+
+  base::AutoLock auto_lock(lock_);
+  settings_[kUserAgentOverridePrefName] = stored;
 }
 
 void GlobalFeatures::InitializeActiveConfigData(
