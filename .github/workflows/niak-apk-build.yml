@@ -123,10 +123,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.android"
-          if [[ ! -f "$HOME/.android/debug.keystore" ]]; then
-            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Niak Cobalt TEST,O=Niak,C=FR" -keyalg RSA -keysize 2048 -validity 3650
+          # GN's cobalt/android/BUILD.gn resolves ../../.android/debug.keystore
+          # relative to out/android-<arch>_qa, i.e. cobalt/src/.android.
+          # $HOME/.android alone is not the keystore referenced by Ninja.
+          keystore="$GITHUB_WORKSPACE/cobalt/src/.android/debug.keystore"
+          mkdir -p "$(dirname "$keystore")"
+          if [[ ! -f "$keystore" ]]; then
+            keytool -genkeypair -keystore "$keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Niak Cobalt TEST,O=Niak,C=FR" -keyalg RSA -keysize 2048 -validity 3650
           fi
+          test -s "$keystore"
+          keytool -list -keystore "$keystore" -storepass android -alias androiddebugkey >/dev/null
+          echo "Cobalt APK QA signing key prepared at the path required by GN"
       - name: GN and Ninja — genuine Cobalt APK
         working-directory: cobalt/src
         shell: bash
