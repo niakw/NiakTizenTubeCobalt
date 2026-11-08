@@ -22,6 +22,11 @@ Cobalt is a lightweight, cross-platform application container and runtime for HT
 - 🔺 **[DeArrow](https://dearrow.ajay.app/) Support**: Remove clickbait and misleading video titles.
 - ➕ **More to come!** Request features via [issues](https://github.com/reisxd/TizenTube/issues/new).
 
+> [!IMPORTANT]
+> **Source fork:** the GitHub release links below point to the official upstream TizenTube Cobalt APKs, **not** builds of this fork. Commits made here are not included in those APKs. To use fork-specific changes, a separately built and signed APK is required; no fork-specific APK release is currently available.
+>
+> **Component boundary:** YouTube UI customizations (including the proposed video/channel hiding changes in [TizenTube PR #720](https://github.com/reisxd/TizenTube/pull/720)) live in the separate `reisxd/TizenTube` JavaScript project and are not automatically included when this Cobalt runtime is changed.
+
 ## ⬇️ Download
 
 Get the latest release for your platform:
