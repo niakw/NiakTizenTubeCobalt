@@ -20,5 +20,12 @@ blink_modules_sources("h5vcc_tizen_tube") {
     "h_5_vcc_tizen_tube.h",
   ]
 
-  deps = [ "//cobalt/browser/h5vcc_tizentube/public/mojom:mojom_blink",  ]
+  deps = [ "//cobalt/browser/h5vcc_tizentube/public/mojom:mojom_blink" ]
+
+  # The Android implementation calls StarboardBridge directly from Blink.
+  # GN's include checker requires an explicit dependency on the target that
+  # owns starboard_bridge.h; an indirect private dependency is insufficient.
+  if (is_android) {
+    deps += [ "//starboard/android/shared:starboard_platform" ]
+  }
 }
