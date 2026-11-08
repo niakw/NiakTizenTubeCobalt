@@ -640,9 +640,18 @@ void Shell::RegisterInjectedJavaScript() {
     std::string js(reinterpret_cast<const char*>(file_contents.data),
                    file_contents.size);
 
-    // Inject a script at document start for all origins
+    // Restrict Niak's YouTube TV recommendation interceptor to the YouTube
+    // origins on which it is useful. The generic Cobalt media polyfill is
+    // deliberately left available to other embedded web content.
     const std::u16string script(base::UTF8ToUTF16(js));
-    const std::vector<std::string> allowed_origins({"*"});
+    const bool is_niak_filter =
+        file_name == "niak_tizentube_filters.js";
+    const std::vector<std::string> allowed_origins =
+        is_niak_filter
+            ? std::vector<std::string>{"https://www.youtube.com",
+                                       "https://youtube.com",
+                                       "https://m.youtube.com"}
+            : std::vector<std::string>{"*"};
     auto result = js_communication_host_->AddDocumentStartJavaScript(
         script, allowed_origins);
 
