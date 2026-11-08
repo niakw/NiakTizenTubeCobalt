@@ -79,3 +79,17 @@ test('The updater is a compiled Android activity with verified HTTPS APKs', () =
   const resources = read('cobalt/shell/android/BUILD.gn');
   assert.match(resources, /java\/res\/values\/update_strings\.xml/);
 });
+
+test('A transient Blink document cannot consume the initial deep link on construction', () => {
+  const cpp = read('third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.cc');
+  const header = read('third_party/blink/renderer/modules/cobalt/h5vcc_runtime/h_5_vcc_runtime.h');
+  const constructor = cpp.split('H5vccRuntime::H5vccRuntime')[1]
+    .split('void H5vccRuntime::ContextDestroyed')[0];
+  const getter = cpp.split('String H5vccRuntime::initialDeepLink()')[1]
+    .split('void H5vccRuntime::MaybeFireDeepLinkEvent')[0];
+  assert.doesNotMatch(constructor, /GetAndClearInitialDeepLinkSync/);
+  assert.match(getter, /if \(!initial_deep_link_fetched_ && GetExecutionContext\(\)\)/);
+  assert.match(getter, /GetAndClearInitialDeepLinkSync\(&initial_deep_link_\)/);
+  assert.match(getter, /initial_deep_link_fetched_ = true;/);
+  assert.match(header, /initial_deep_link_fetched_ = false;/);
+});
