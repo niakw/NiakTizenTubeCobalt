@@ -1,0 +1,407 @@
+/*
+ * Niak TizenTube Cobalt video and channel filters.
+ * Ported independently from the behavior of reisxd/TizenTube PR #720.
+ * Local filtering is deliberately separate from the remotely loaded userscript.
+ * This script ships inside the APK via Cobalt's document-start JS resources.
+ */
+(function () {
+  'use strict';
+  if (!/^(www\.youtube\.com|youtube\.com|m\.youtube\.com)$/.test(window.location.hostname)) return;
+  if (window.__niakTizenTubeFiltersV1) return;
+  window.__niakTizenTubeFiltersV1 = true;
+
+  var STORAGE_KEY = 'niak-tizentube-filters-v1';
+  var MAX_HIDDEN = 1000;
+  var MAX_CHANNELS = 250;
+  var fr = /^fr\b/i.test(navigator.language || '');
+  var text = fr ? {
+    hide: 'Pas intéressé', dont: 'Ne pas recommander cette chaîne',
+    block: 'Bloquer cette chaîne', manage: 'Gérer les vidéos et chaînes masquées',
+    heading: 'Vidéos et chaînes masquées', clear: 'Réafficher toutes les vidéos',
+    clearChannels: 'Débloquer toutes les chaînes', none: 'Aucune chaîne bloquée',
+    unblock: 'Débloquer : ', hidden: 'Vidéo masquée (actualise les recommandations)',
+    blocked: 'Chaîne bloquée (actualise les recommandations)',
+    restored: 'Filtres mis à jour', unavailable: 'Chaîne non identifiable'
+  } : {
+    hide: 'Not interested', dont: "Don't recommend this channel",
+    block: 'Block channel', manage: 'Manage hidden videos and channels',
+    heading: 'Hidden videos and blocked channels', clear: 'Restore all hidden videos',
+    clearChannels: 'Unblock all channels', none: 'No blocked channels',
+    unblock: 'Unblock: ', hidden: 'Video hidden (refresh recommendations)',
+    blocked: 'Channel blocked (refresh recommendations)',
+    restored: 'Filters updated', unavailable: 'Channel unavailable'
+  };
+
+  function emptyState() { return { hiddenVideos: [], blockedChannels: [], channelNames: {} }; }
+  function readState() {
+    try {
+      var value = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+      if (!value || typeof value !== 'object') return emptyState();
+      return {
+        hiddenVideos: Array.isArray(value.hiddenVideos) ? value.hiddenVideos.filter(function (v) { return typeof v === 'string'; }).slice(-MAX_HIDDEN) : [],
+        blockedChannels: Array.isArray(value.blockedChannels) ? value.blockedChannels.filter(function (v) { return typeof v === 'string'; }).slice(-MAX_CHANNELS) : [],
+        channelNames: value.channelNames && typeof value.channelNames === 'object' && !Array.isArray(value.channelNames) ? value.channelNames : {}
+      };
+    } catch (error) { return emptyState(); }
+  }
+  function writeState(value) {
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); }
+    catch (error) { console.warn('Niak filters: storage unavailable', error); }
+  }
+  function displayText(node) {
+    if (typeof node === 'string') return node;
+    if (!node || typeof node !== 'object') return '';
+    if (typeof node.simpleText === 'string') return node.simpleText;
+    if (typeof node.content === 'string') return node.content;
+    if (Array.isArray(node.runs)) return node.runs.map(function (x) { return x && x.text || ''; }).join('');
+    return '';
+  }
+  function findChannelId(value, depth) {
+    if (!value || typeof value !== 'object' || depth > 11) return null;
+    var browse = value.browseEndpoint && value.browseEndpoint.browseId;
+    if (typeof browse === 'string' && /^UC[A-Za-z0-9_-]{22}$/.test(browse)) return browse;
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length && i < 50; i++) {
+      var id = findChannelId(value[keys[i]], depth + 1);
+      if (id) return id;
+    }
+    return null;
+  }
+  function videoId(item) {
+    var id = item && (item.tileRenderer && item.tileRenderer.contentId ||
+      item.lockupViewModel && item.lockupViewModel.contentId);
+    return typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  }
+  function channelInfo(item) {
+    var t = item && item.tileRenderer;
+    var l = item && item.lockupViewModel;
+    var nameNode = t ? t.metadata && t.metadata.tileMetadataRenderer && t.metadata.tileMetadataRenderer.lines &&
+      t.metadata.tileMetadataRenderer.lines[0] && t.metadata.tileMetadataRenderer.lines[0].lineRenderer &&
+      t.metadata.tileMetadataRenderer.lines[0].lineRenderer.items &&
+      t.metadata.tileMetadataRenderer.lines[0].lineRenderer.items[0] &&
+      t.metadata.tileMetadataRenderer.lines[0].lineRenderer.items[0].lineItemRenderer &&
+      t.metadata.tileMetadataRenderer.lines[0].lineRenderer.items[0].lineItemRenderer.text :
+      l && l.metadata && l.metadata.lockupMetadataViewModel && l.metadata.lockupMetadataViewModel.metadata &&
+      l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel &&
+      l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows &&
+      l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0] &&
+      l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0].metadataParts &&
+      l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0].metadataParts[0] &&
+      l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0].metadataParts[0].text;
+    var name = displayText(nameNode).trim();
+    var id = findChannelId(nameNode, 0) || findChannelId(item, 0);
+    return name || id ? { id: id, name: name } : null;
+  }
+  function channelKey(channel) {
+    if (!channel || typeof channel !== 'object') return null;
+    if (channel.id && /^UC[A-Za-z0-9_-]{22}$/.test(channel.id)) return 'id:' + channel.id;
+    if (typeof channel.name === 'string' && channel.name.trim()) return 'name:' + channel.name.trim().toLowerCase();
+    return null;
+  }
+  function blockChannel(channel) {
+    var key = channelKey(channel);
+    if (!key) return false;
+    var state = readState();
+    if (state.blockedChannels.indexOf(key) === -1) state.blockedChannels.push(key);
+    state.blockedChannels = state.blockedChannels.slice(-MAX_CHANNELS);
+    state.channelNames[key] = channel.name || channel.id;
+    writeState(state);
+    return true;
+  }
+  function hideVideo(id) {
+    if (!id) return false;
+    var state = readState();
+    if (state.hiddenVideos.indexOf(id) === -1) state.hiddenVideos.push(id);
+    state.hiddenVideos = state.hiddenVideos.slice(-MAX_HIDDEN);
+    writeState(state);
+    return true;
+  }
+  function exemptions() {
+    return /FElibrary|FEhistory|FEplaylist|\/playlist|[?&]list=/i.test(window.location.hash || '');
+  }
+  function isVideo(item) {
+    return !!(item && (item.tileRenderer && item.tileRenderer.style === 'TILE_STYLE_YTLR_DEFAULT' ||
+      item.lockupViewModel && item.lockupViewModel.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO'));
+  }
+  function isBlocked(item, state) {
+    if (!isVideo(item)) return false;
+    if (state.hiddenVideos.indexOf(videoId(item)) !== -1) return true;
+    var channel = channelInfo(item);
+    if (!channel) return false;
+    var key = channelKey(channel);
+    if (key && state.blockedChannels.indexOf(key) !== -1) return true;
+    if (channel.name) {
+      var nameKey = 'name:' + channel.name.toLowerCase();
+      if (state.blockedChannels.indexOf(nameKey) !== -1) return true;
+      if (!channel.id) {
+        for (var i = 0; i < state.blockedChannels.length; i++) {
+          var k = state.blockedChannels[i];
+          if (k.indexOf('id:') === 0 && String(state.channelNames[k] || '').toLowerCase() === channel.name.toLowerCase()) return true;
+        }
+      }
+    }
+    return false;
+  }
+  function serviceItem(title, action, parameters) {
+    return { menuServiceItemRenderer: {
+      text: { runs: [{ text: title }] },
+      trackingParams: null,
+      serviceEndpoint: { clickTrackingParams: null, playlistEditEndpoint: {
+        customAction: { action: action, parameters: parameters || null }
+      } }
+    } };
+  }
+  function feedbackPanel(item) {
+    var t = item && item.tileRenderer, l = item && item.lockupViewModel;
+    var onLongPress = t && t.onLongPressCommand ||
+      l && l.rendererContext && l.rendererContext.commandContext && l.rendererContext.commandContext.onLongPress;
+    var endpoint = onLongPress && (onLongPress.showEngagementPanelEndpoint ||
+      onLongPress.innertubeCommand && onLongPress.innertubeCommand.showEngagementPanelEndpoint);
+    if (endpoint && endpoint.identifier && endpoint.identifier.tag &&
+      endpoint.globalConfiguration && endpoint.globalConfiguration.params) {
+      return { panelId: endpoint.identifier.tag, params: endpoint.globalConfiguration.params };
+    }
+    return null;
+  }
+  function menuFor(item) {
+    var t = item.tileRenderer, l = item.lockupViewModel;
+    var cmd = t ? t.onLongPressCommand :
+      l.rendererContext && l.rendererContext.commandContext &&
+      l.rendererContext.commandContext.onLongPress &&
+      l.rendererContext.commandContext.onLongPress.innertubeCommand;
+    if (cmd && cmd.showMenuCommand && cmd.showMenuCommand.menu &&
+      cmd.showMenuCommand.menu.menuRenderer && Array.isArray(cmd.showMenuCommand.menu.menuRenderer.items)) {
+      return cmd.showMenuCommand.menu.menuRenderer.items;
+    }
+    var id = videoId(item), navigation = t ? t.onSelectCommand :
+      l.rendererContext && l.rendererContext.commandContext && l.rendererContext.commandContext.onTap &&
+      l.rendererContext.commandContext.onTap.innertubeCommand;
+    if (!id || !navigation || !navigation.watchEndpoint) return null;
+    var items = [{ menuNavigationItemRenderer: {
+      text: { runs: [{ text: fr ? 'Lire' : 'Play' }] },
+      navigationEndpoint: navigation, trackingParams: null
+    } }];
+    var data = { showMenuCommand: {
+      contentId: id, thumbnail: { thumbnails: t && t.header && t.header.tileHeaderRenderer &&
+        t.header.tileHeaderRenderer.thumbnail && t.header.tileHeaderRenderer.thumbnail.thumbnails || [] },
+      title: { simpleText: '' }, subtitle: { simpleText: '' },
+      menu: { menuRenderer: { items: items, trackingParams: null } }
+    } };
+    if (t) t.onLongPressCommand = data;
+    else {
+      if (!l.rendererContext.commandContext) l.rendererContext.commandContext = {};
+      l.rendererContext.commandContext.onLongPress = { innertubeCommand: data };
+    }
+    return items;
+  }
+  function decorateMenu(item) {
+    if (!isVideo(item) || !videoId(item)) return;
+    var items = menuFor(item);
+    if (!items) return;
+    if (items.some(function (m) {
+      var c = m && m.menuServiceItemRenderer && m.menuServiceItemRenderer.serviceEndpoint;
+      return c && c.playlistEditEndpoint && c.playlistEditEndpoint.customAction &&
+        c.playlistEditEndpoint.customAction.action === 'NIAK_NOT_INTERESTED';
+    })) return;
+    var channel = channelInfo(item), panel = feedbackPanel(item);
+    items.push(serviceItem(text.hide, 'NIAK_NOT_INTERESTED', { videoId: videoId(item), panel: panel }));
+    if (channel) {
+      items.push(serviceItem(text.dont, 'NIAK_DONT_RECOMMEND', { channel: channel, panel: panel }));
+      items.push(serviceItem(text.block, 'NIAK_BLOCK_CHANNEL', { channel: channel }));
+    }
+    items.push(serviceItem(text.manage, 'NIAK_MANAGE_FILTERS', null));
+  }
+  function filterItems(items) {
+    if (!Array.isArray(items)) return items;
+    for (var i = 0; i < items.length; i++) decorateMenu(items[i]);
+    if (exemptions()) return items;
+    var state = readState();
+    if (!state.hiddenVideos.length && !state.blockedChannels.length) return items;
+    return items.filter(function (item) { return !isBlocked(item, state); });
+  }
+  function decoratePayload(root) {
+    if (!root || typeof root !== 'object' || Array.isArray(root)) return;
+    if (!root.contents && !root.continuationContents) return;
+    var seen = new WeakSet(), count = 0;
+    function walk(obj, depth) {
+      if (!obj || typeof obj !== 'object' || seen.has(obj) || depth > 22 || ++count > 3000) return;
+      seen.add(obj);
+      if (obj.horizontalListRenderer && Array.isArray(obj.horizontalListRenderer.items))
+        obj.horizontalListRenderer.items = filterItems(obj.horizontalListRenderer.items);
+      if (obj.gridRenderer && Array.isArray(obj.gridRenderer.items))
+        obj.gridRenderer.items = filterItems(obj.gridRenderer.items);
+      if (obj.horizontalListContinuation && Array.isArray(obj.horizontalListContinuation.items))
+        obj.horizontalListContinuation.items = filterItems(obj.horizontalListContinuation.items);
+      if (obj.gridContinuation && Array.isArray(obj.gridContinuation.items))
+        obj.gridContinuation.items = filterItems(obj.gridContinuation.items);
+      var keys = Object.keys(obj);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k === 'metadata' || k === 'rendererContext' || k === 'menu' || k === 'streamingData') continue;
+        var v = obj[k];
+        if (v && typeof v === 'object') {
+          if (Array.isArray(v)) {
+            for (var j = 0; j < v.length && j < 250; j++) walk(v[j], depth + 1);
+          } else walk(v, depth + 1);
+        }
+      }
+    }
+    walk(root, 0);
+  }
+
+  // The installed TizenTube userscript may wrap JSON.parse too. Chaining from
+  // document-start keeps our filtering usable without replacing that script.
+  var nativeParse = JSON.parse;
+  JSON.parse = function () {
+    var data = nativeParse.apply(this, arguments);
+    try { decoratePayload(data); }
+    catch (error) { console.warn('Niak filters: unable to process recommendations', error); }
+    return data;
+  };
+  window.JSON.parse = JSON.parse;
+
+  function findResolve() {
+    var yttv = window._yttv;
+    if (!yttv || typeof yttv !== 'object') return [];
+    return Object.keys(yttv).map(function (key) {
+      return yttv[key] && yttv[key].instance;
+    }).filter(function (instance) {
+      return instance && typeof instance.resolveCommand === 'function';
+    });
+  }
+  function resolveUi(command) {
+    var instances = findResolve();
+    if (instances.length) return instances[0].resolveCommand(command);
+    return false;
+  }
+  function toast(message) {
+    resolveUi({ openPopupAction: { popupType: 'TOAST', popup: {
+      overlayToastRenderer: { title: { simpleText: 'TizenTube' }, subtitle: { simpleText: message } }
+    } } });
+  }
+  function compactLink(label, action, parameters) {
+    return { compactLinkRenderer: {
+      title: { simpleText: label },
+      serviceEndpoint: { commandExecutorCommand: { commands: [
+        { playlistEditEndpoint: { customAction: { action: action, parameters: parameters || null } } }
+      ] } }
+    } };
+  }
+  function showManage() {
+    var state = readState(), list = [
+      compactLink(text.clear + ' (' + state.hiddenVideos.length + ')', 'NIAK_CLEAR_VIDEOS'),
+      compactLink(text.clearChannels + ' (' + state.blockedChannels.length + ')', 'NIAK_CLEAR_CHANNELS')
+    ];
+    for (var i = 0; i < state.blockedChannels.length && i < 60; i++) {
+      var key = state.blockedChannels[i];
+      list.push(compactLink(text.unblock + (state.channelNames[key] || key), 'NIAK_UNBLOCK_CHANNEL', { key: key }));
+    }
+    if (!state.blockedChannels.length) list.push({ overlayMessageRenderer: {
+      message: { simpleText: text.none }
+    } });
+    resolveUi({ openPopupAction: { popupType: 'MODAL', uniqueId: 'niak-filter-settings',
+      popup: { overlaySectionRenderer: { overlay: { overlayTwoPanelRenderer: {
+        actionPanel: { overlayPanelRenderer: {
+          header: { overlayPanelHeaderRenderer: { title: { simpleText: text.heading } } },
+          content: { overlayPanelItemListRenderer: { items: list } }
+        } },
+        backButton: { buttonRenderer: { command: { signalAction: { signal: 'POPUP_BACK' } } } }
+      } }, dismissalCommand: { signalAction: { signal: 'POPUP_BACK' } } } }
+    } });
+  }
+  function sendYoutubeFeedback(panel, index) {
+    if (!panel) return;
+    try {
+      var yttv = window._yttv;
+      if (!yttv) return;
+      var mappings = Object.keys(yttv).map(function (key) { return yttv[key] && yttv[key].mappings; })
+        .filter(function (m) { return m && typeof m.get === 'function'; })[0];
+      if (!mappings) return;
+      var client = mappings.get('KabukiInnerTubeClient');
+      if (!client || !client.fetch) return;
+      client.fetch({ path: '/youtubei/v1/get_panel',
+        payload: { panelId: panel.panelId, params: panel.params } }).subscribe(function (r) {
+        var list = r && r.content && r.content.engagementPanelSectionListRenderer &&
+          r.content.engagementPanelSectionListRenderer.content &&
+          r.content.engagementPanelSectionListRenderer.content.listViewModel &&
+          r.content.engagementPanelSectionListRenderer.content.listViewModel.listItems;
+        if (!Array.isArray(list)) return;
+        function findToken(obj, depth) {
+          if (!obj || typeof obj !== 'object' || depth > 12) return null;
+          if (typeof obj.feedbackToken === 'string') return obj.feedbackToken;
+          var values = Object.keys(obj);
+          for (var i = 0; i < values.length; i++) {
+            var found = findToken(obj[values[i]], depth + 1);
+            if (found) return found;
+          }
+          return null;
+        }
+        var tokens = list.map(function (x) { return findToken(x && x.listItemViewModel, 0); }).filter(Boolean);
+        if (tokens[index]) client.fetch({ path: '/youtubei/v1/feedback',
+          payload: { feedbackTokens: [tokens[index]] } }).subscribe(function () {}, function () {});
+      }, function () {});
+    } catch (error) { console.warn('Niak filters: feedback unavailable', error); }
+  }
+  function actionOf(cmd) {
+    return cmd && (cmd.customAction || cmd.signalAction && cmd.signalAction.customAction ||
+      cmd.playlistEditEndpoint && cmd.playlistEditEndpoint.customAction);
+  }
+  function handle(action, parameters) {
+    if (action === 'NIAK_NOT_INTERESTED') {
+      if (parameters && hideVideo(parameters.videoId)) {
+        sendYoutubeFeedback(parameters.panel, 0); toast(text.hidden);
+      }
+    } else if (action === 'NIAK_DONT_RECOMMEND') {
+      if (parameters && blockChannel(parameters.channel)) {
+        sendYoutubeFeedback(parameters.panel, 1); toast(text.blocked);
+      } else toast(text.unavailable);
+    } else if (action === 'NIAK_BLOCK_CHANNEL') {
+      if (parameters && blockChannel(parameters.channel)) toast(text.blocked);
+      else toast(text.unavailable);
+    } else if (action === 'NIAK_MANAGE_FILTERS') showManage();
+    else if (action === 'NIAK_CLEAR_VIDEOS') {
+      var s = readState(); s.hiddenVideos = []; writeState(s); toast(text.restored); showManage();
+    } else if (action === 'NIAK_CLEAR_CHANNELS') {
+      var s2 = readState(); s2.blockedChannels = []; s2.channelNames = {}; writeState(s2); toast(text.restored); showManage();
+    } else if (action === 'NIAK_UNBLOCK_CHANNEL') {
+      var s3 = readState(), k = parameters && parameters.key;
+      s3.blockedChannels = s3.blockedChannels.filter(function (v) { return v !== k; });
+      delete s3.channelNames[k]; writeState(s3); toast(text.restored); showManage();
+    }
+  }
+  function installCommandPatch() {
+    var instances = findResolve();
+    for (var i = 0; i < instances.length; i++) {
+      var instance = instances[i], original = instance.resolveCommand;
+      if (original.__niakFiltersPatched) continue;
+      var wrapped = (function (og) {
+        return function (cmd) {
+          var a = actionOf(cmd);
+          if (a && typeof a.action === 'string' && a.action.indexOf('NIAK_') === 0) {
+            handle(a.action, a.parameters);
+            return true;
+          }
+          if (cmd && cmd.commandExecutorCommand && Array.isArray(cmd.commandExecutorCommand.commands)) {
+            var commands = cmd.commandExecutorCommand.commands;
+            var allLocal = commands.length > 0 && commands.every(function (command) {
+              var a = actionOf(command);
+              return a && typeof a.action === 'string' && a.action.indexOf('NIAK_') === 0;
+            });
+            if (allLocal) {
+              commands.forEach(function (command) {
+                var a = actionOf(command); handle(a.action, a.parameters);
+              });
+              return true;
+            }
+          }
+          return og.apply(this, arguments);
+        };
+      })(original);
+      wrapped.__niakFiltersPatched = true;
+      instance.resolveCommand = wrapped;
+    }
+  }
+  installCommandPatch();
+  // Some YouTube TV builds replace their command resolver after boot/navigation.
+  window.setInterval(installCommandPatch, 1500);
+})();
