@@ -97,6 +97,15 @@ jobs:
           gclient sync --nohooks --shallow --no-history --revision "$TARGET_SHA"
           gclient runhooks
           test "$(git -C src rev-parse HEAD)" = "$TARGET_SHA"
+      - name: Verify and embed immutable main TizenTube userscript
+        working-directory: cobalt/src
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/niak-embed-tizentube.sh
+          test -s cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_upstream_tizentube.js
+          echo "TizenTube build SHA256: 9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pinned TizenTube main userscript included in GN source inputs"
       - name: Prepare test-only debug signing certificate
         shell: bash
         run: |
