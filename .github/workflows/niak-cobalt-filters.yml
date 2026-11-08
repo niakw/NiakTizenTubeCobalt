@@ -10,6 +10,8 @@ on:
       - 'tests/*.test.cjs'
       - 'cobalt/shell/browser/shell.cc'
       - 'cobalt/browser/global_features*'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java'
+      - 'starboard/android/shared/video_render_algorithm_android.cc'
       - '.github/workflows/niak-cobalt-filters.yml'
   pull_request:
     paths:
@@ -18,6 +20,8 @@ on:
       - 'tests/*.test.cjs'
       - 'cobalt/shell/browser/shell.cc'
       - 'cobalt/browser/global_features*'
+      - 'cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java'
+      - 'starboard/android/shared/video_render_algorithm_android.cc'
   workflow_dispatch:
 
 permissions:
@@ -38,6 +42,8 @@ jobs:
             cobalt/browser/global_features.cc
             cobalt/browser/global_features.h
             cobalt/browser/global_features_unittest.cc
+            cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+            starboard/android/shared/video_render_algorithm_android.cc
             cobalt/shell/embedded_resources/cobalt_java_script_polyfill
             tests
           sparse-checkout-cone-mode: false
