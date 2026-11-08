@@ -1,8 +1,7 @@
 name: Autoroll Main
 
 on:
-  schedule:
-#    - cron: '0 * * * *' # Hourly.
+  # Autoroll is explicitly dispatched; no empty schedule trigger.
   workflow_dispatch:
     inputs:
       max_commits:
