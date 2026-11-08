@@ -220,30 +220,53 @@
     }
     items.push(serviceItem(text.manage, 'NIAK_MANAGE_FILTERS', null));
   }
-  function filterItems(items, state) {
+  // The main TizenTube userscript already removes adSlotRenderer in some
+  // home layouts. This backstop covers nested and continuation shelves, without
+  // attempting to guess whether editorial/featured videos are paid ads.
+  function adBlockingEnabled() {
+    try {
+      var stored = window.localStorage.getItem('ytaf-configuration');
+      if (!stored) return true;
+      var config = nativeParse(stored);
+      return !config || config.enableAdBlock !== false;
+    } catch (error) { return true; }
+  }
+  function isConfirmedAdSlot(item) {
+    return !!(item && typeof item === 'object' &&
+      Object.prototype.hasOwnProperty.call(item, 'adSlotRenderer'));
+  }
+  function filterItems(items, state, blockAds) {
     if (!Array.isArray(items)) return items;
     for (var i = 0; i < items.length; i++) decorateMenu(items[i]);
     if (exemptions()) return items;
-    if (!state.hiddenVideos.length && !state.blockedChannels.length) return items;
-    return items.filter(function (item) { return !isBlocked(item, state); });
+    if (!state.hiddenVideos.length && !state.blockedChannels.length && !blockAds) return items;
+    return items.filter(function (item) {
+      return !(blockAds && isConfirmedAdSlot(item)) && !isBlocked(item, state);
+    });
   }
   function decoratePayload(root) {
     if (!root || typeof root !== 'object' || Array.isArray(root)) return;
     if (!root.contents && !root.continuationContents) return;
     // Read localStorage once per network response instead of once per shelf.
     var state = readState();
+    var blockAds = adBlockingEnabled();
     var seen = new WeakSet(), count = 0;
     function walk(obj, depth) {
       if (!obj || typeof obj !== 'object' || seen.has(obj) || depth > 22 || ++count > 3000) return;
       seen.add(obj);
+      if (obj.sectionListRenderer && Array.isArray(obj.sectionListRenderer.contents) &&
+          blockAds && !exemptions()) {
+        obj.sectionListRenderer.contents =
+          obj.sectionListRenderer.contents.filter(function (item) { return !isConfirmedAdSlot(item); });
+      }
       if (obj.horizontalListRenderer && Array.isArray(obj.horizontalListRenderer.items))
-        obj.horizontalListRenderer.items = filterItems(obj.horizontalListRenderer.items, state);
+        obj.horizontalListRenderer.items = filterItems(obj.horizontalListRenderer.items, state, blockAds);
       if (obj.gridRenderer && Array.isArray(obj.gridRenderer.items))
-        obj.gridRenderer.items = filterItems(obj.gridRenderer.items, state);
+        obj.gridRenderer.items = filterItems(obj.gridRenderer.items, state, blockAds);
       if (obj.horizontalListContinuation && Array.isArray(obj.horizontalListContinuation.items))
-        obj.horizontalListContinuation.items = filterItems(obj.horizontalListContinuation.items, state);
+        obj.horizontalListContinuation.items = filterItems(obj.horizontalListContinuation.items, state, blockAds);
       if (obj.gridContinuation && Array.isArray(obj.gridContinuation.items))
-        obj.gridContinuation.items = filterItems(obj.gridContinuation.items, state);
+        obj.gridContinuation.items = filterItems(obj.gridContinuation.items, state, blockAds);
       var keys = Object.keys(obj);
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
