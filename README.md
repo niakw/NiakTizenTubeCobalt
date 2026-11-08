@@ -25,7 +25,22 @@ Cobalt is a lightweight, cross-platform application container and runtime for HT
 > [!IMPORTANT]
 > **Source fork:** the GitHub release links below point to the official upstream TizenTube Cobalt APKs, **not** builds of this fork. Commits made here are not included in those APKs. To use fork-specific changes, a separately built and signed APK is required; no fork-specific APK release is currently available.
 >
-> **Component boundary:** YouTube UI customizations (including the proposed video/channel hiding changes in [TizenTube PR #720](https://github.com/reisxd/TizenTube/pull/720)) live in the separate `reisxd/TizenTube` JavaScript project and are not automatically included when this Cobalt runtime is changed.
+> **Component boundary:** This fork now embeds an independent Cobalt-side port of the video/channel hiding controls described in [TizenTube PR #720](https://github.com/reisxd/TizenTube/pull/720). It is not a merge of the TizenTube JavaScript PR and does not replace the upstream userscript. More advanced upstream feedback prompts may differ.
+
+## Niak fork: local recommendation controls
+
+This fork adds a **document-start JavaScript extension bundled into the Cobalt APK**. On a recommended video tile, **long-press OK** and select:
+
+- **Not interested / Pas intéressé** — hide that video locally.
+- **Don't recommend this channel / Ne pas recommander cette chaîne** — block its recommendations locally. If YouTube supplied an engagement feedback panel, the extension also attempts to send the account feedback.
+- **Block channel / Bloquer cette chaîne** — local channel blocklist by ID (or by name if the channel ID is absent).
+- **Manage hidden videos and channels / Gérer les vidéos et chaînes masquées** — unblock an individual channel, clear all blocked channels, or restore all hidden videos.
+
+Filtering applies to recommendation shelves, grids, and continuations after the **next feed refresh**. Library, history, and playlist pages are deliberately exempt. The extension saves preferences in app-local storage (`niak-tizentube-filters-v1`) and does not require another patched TizenTube repository. It has English/French labels.
+
+**Limits:** The displayed controls and modal still require a real Android TV device test. The lightweight CI validates JavaScript syntax, menu structures, persistence, filters and native resource embedding; it **does not compile or sign an APK**. The official upstream APK linked below **does not contain these fork changes**. Local blocks are not synchronized to your Google account, and optional feedback requests can fail if YouTube changes its API.
+
+[View Niak video filters CI](https://github.com/niakw/TizenTubeCobalt/actions/workflows/niak-cobalt-filters.yml)
 
 ## ⬇️ Download
 
