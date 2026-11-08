@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/niak-apk-build.yml'
+      # A GN dependency repair must rebuild the actual APK, rather than
+      # passing source-only checks without exercising gn gen --check.
+      - 'third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/BUILD.gn'
   workflow_dispatch:
     inputs:
       architecture:
