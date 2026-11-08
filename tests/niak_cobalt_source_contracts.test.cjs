@@ -110,3 +110,10 @@ test('TizenTube update bridge reports Android acceptance rather than uncondition
   assert.match(method, /return bridge->InstallAppFromURL\(env, url\.Utf8\(\)\.data\(\)\);/);
   assert.doesNotMatch(method, /bridge->InstallAppFromURL\([^;]+;\s*return true;/);
 });
+
+test('Blink TizenTube GN declares the direct Android StarboardBridge dependency', () => {
+  const gn = read('third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/BUILD.gn');
+  const cpp = read('third_party/blink/renderer/modules/cobalt/h5vcc_tizen_tube/h_5_vcc_tizen_tube.cc');
+  assert.match(cpp, /#include "starboard\/android\/shared\/starboard_bridge\.h"/);
+  assert.match(gn, /if \(is_android\) \{\s*deps \+= \[ "\/\/starboard\/android\/shared:starboard_platform" \]/);
+});
