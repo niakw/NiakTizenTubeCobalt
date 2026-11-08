@@ -73,6 +73,18 @@ jobs:
           if (( free_disk < 85 * 1024 * 1024 || ram < 13 * 1024 * 1024 )); then
             echo "Insufficient disk/RAM after cleanup, aborting before full source sync"; exit 1
           fi
+      - name: Install and verify native Chromium host tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Blink's color_data.gperf rule executes gperf from PATH.
+          # Ubuntu 24.04 GitHub runners do not provide it by default.
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gperf
+          command -v gperf
+          gperf --version
+          # Fail before the expensive gclient sync if the build tool is missing.
+          test -x "$(command -v gperf)"
       - uses: actions/checkout@v4
         with:
           path: cobalt/src
