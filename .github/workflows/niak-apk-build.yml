@@ -123,17 +123,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # GN's cobalt/android/BUILD.gn resolves ../../.android/debug.keystore
-          # relative to out/android-<arch>_qa, i.e. cobalt/src/.android.
-          # $HOME/.android alone is not the keystore referenced by Ninja.
-          keystore="$GITHUB_WORKSPACE/cobalt/src/.android/debug.keystore"
-          mkdir -p "$(dirname "$keystore")"
+          # cobalt/android/BUILD.gn sets keystore_path to
+          # "../../../../.android/debug.keystore", which resolves to the
+          # WORKSPACE root from cobalt/src/cobalt/android. The generated
+          # Ninja rule also references ../../.android from the output tree.
+          # Supply the SAME transient test certificate at both resolved paths.
+          # Neither copy is committed or reused as a production signing key.
+          keystore="$GITHUB_WORKSPACE/.android/debug.keystore"
+          from_output="$GITHUB_WORKSPACE/cobalt/src/.android/debug.keystore"
+          mkdir -p "$(dirname "$keystore")" "$(dirname "$from_output")"
           if [[ ! -f "$keystore" ]]; then
             keytool -genkeypair -keystore "$keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Niak Cobalt TEST,O=Niak,C=FR" -keyalg RSA -keysize 2048 -validity 3650
           fi
-          test -s "$keystore"
-          keytool -list -keystore "$keystore" -storepass android -alias androiddebugkey >/dev/null
-          echo "Cobalt APK QA signing key prepared at the path required by GN"
+          cp "$keystore" "$from_output"
+          for file in "$keystore" "$from_output"; do
+            test -s "$file"
+            keytool -list -keystore "$file" -storepass android -alias androiddebugkey >/dev/null
+          done
+          test "$(sha256sum "$keystore" | awk '{print $1}')" = "$(sha256sum "$from_output" | awk '{print $1}')"
+          echo "Verified identical debug keystore at both GN/Siso resolved locations"
       - name: GN and Ninja — genuine Cobalt APK
         working-directory: cobalt/src
         shell: bash
