@@ -65,7 +65,7 @@ function menuOf(item) {
   return item.tileRenderer.onLongPressCommand.showMenuCommand.menu.menuRenderer.items;
 }
 function actionsOf(items) {
-  return items.map((x) => x?.menuServiceItemRenderer?.serviceEndpoint?.playlistEditEndpoint?.customAction?.action).filter(Boolean);
+  return Array.from(items, (x) => x?.menuServiceItemRenderer?.serviceEndpoint?.playlistEditEndpoint?.customAction?.action).filter(Boolean);
 }
 
 test('APK filter adds the 4 Cobalt long-press actions to a real-style video tile', () => {
