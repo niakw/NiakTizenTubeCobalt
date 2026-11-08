@@ -13,6 +13,8 @@
   var STORAGE_KEY = 'niak-tizentube-filters-v1';
   var MAX_HIDDEN = 1000;
   var MAX_CHANNELS = 250;
+  // Weak keys prevent the metadata cache from retaining obsolete TV tiles.
+  var channelCache = new WeakMap();
   var fr = /^fr\b/i.test(navigator.language || '');
   var text = fr ? {
     hide: 'Pas intéressé', dont: 'Ne pas recommander cette chaîne',
@@ -73,6 +75,8 @@
     return typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
   }
   function channelInfo(item) {
+    if (!item || typeof item !== 'object') return null;
+    if (channelCache.has(item)) return channelCache.get(item);
     var t = item && item.tileRenderer;
     var l = item && item.lockupViewModel;
     var nameNode = t ? t.metadata && t.metadata.tileMetadataRenderer && t.metadata.tileMetadataRenderer.lines &&
@@ -90,7 +94,9 @@
       l.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0].metadataParts[0].text;
     var name = displayText(nameNode).trim();
     var id = findChannelId(nameNode, 0) || findChannelId(item, 0);
-    return name || id ? { id: id, name: name } : null;
+    var result = name || id ? { id: id, name: name } : null;
+    channelCache.set(item, result);
+    return result;
   }
   function channelKey(channel) {
     if (!channel || typeof channel !== 'object') return null;
@@ -214,29 +220,30 @@
     }
     items.push(serviceItem(text.manage, 'NIAK_MANAGE_FILTERS', null));
   }
-  function filterItems(items) {
+  function filterItems(items, state) {
     if (!Array.isArray(items)) return items;
     for (var i = 0; i < items.length; i++) decorateMenu(items[i]);
     if (exemptions()) return items;
-    var state = readState();
     if (!state.hiddenVideos.length && !state.blockedChannels.length) return items;
     return items.filter(function (item) { return !isBlocked(item, state); });
   }
   function decoratePayload(root) {
     if (!root || typeof root !== 'object' || Array.isArray(root)) return;
     if (!root.contents && !root.continuationContents) return;
+    // Read localStorage once per network response instead of once per shelf.
+    var state = readState();
     var seen = new WeakSet(), count = 0;
     function walk(obj, depth) {
       if (!obj || typeof obj !== 'object' || seen.has(obj) || depth > 22 || ++count > 3000) return;
       seen.add(obj);
       if (obj.horizontalListRenderer && Array.isArray(obj.horizontalListRenderer.items))
-        obj.horizontalListRenderer.items = filterItems(obj.horizontalListRenderer.items);
+        obj.horizontalListRenderer.items = filterItems(obj.horizontalListRenderer.items, state);
       if (obj.gridRenderer && Array.isArray(obj.gridRenderer.items))
-        obj.gridRenderer.items = filterItems(obj.gridRenderer.items);
+        obj.gridRenderer.items = filterItems(obj.gridRenderer.items, state);
       if (obj.horizontalListContinuation && Array.isArray(obj.horizontalListContinuation.items))
-        obj.horizontalListContinuation.items = filterItems(obj.horizontalListContinuation.items);
+        obj.horizontalListContinuation.items = filterItems(obj.horizontalListContinuation.items, state);
       if (obj.gridContinuation && Array.isArray(obj.gridContinuation.items))
-        obj.gridContinuation.items = filterItems(obj.gridContinuation.items);
+        obj.gridContinuation.items = filterItems(obj.gridContinuation.items, state);
       var keys = Object.keys(obj);
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
@@ -257,6 +264,14 @@
   var nativeParse = JSON.parse;
   JSON.parse = function () {
     var data = nativeParse.apply(this, arguments);
+    // Player, comments and settings payloads do not contain video tile
+    // collections. Avoid scanning those large JSON documents on every parse.
+    var source = arguments[0];
+    if (typeof source === 'string' &&
+        source.indexOf('"horizontalListRenderer"') === -1 &&
+        source.indexOf('"gridRenderer"') === -1 &&
+        source.indexOf('"horizontalListContinuation"') === -1 &&
+        source.indexOf('"gridContinuation"') === -1) return data;
     try { decoratePayload(data); }
     catch (error) { console.warn('Niak filters: unable to process recommendations', error); }
     return data;
