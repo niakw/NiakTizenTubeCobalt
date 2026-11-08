@@ -25,7 +25,7 @@ The PR for local video/channel masking is [TizenTube #720](https://github.com/re
 | **P1 in-stream ads** | [#378](https://github.com/reisxd/TizenTubeCobalt/issues/378) skippable ads in live streams | Reproduce on a live stream, identify the player/InnerTube payload and client version; test ad suppression while preserving playback and video position |
 | **P2 home ads** | [#386](https://github.com/reisxd/TizenTubeCobalt/issues/386) featured/sponsored home cards | Added a **conservative** backstop for known `adSlotRenderer` entries in nested shelves/continuations (`8380efb`), respecting the existing ad-block switch; unknown sponsored formats remain unverified |
 | **P2 history** | [#361](https://github.com/reisxd/TizenTubeCobalt/issues/361) viewing timestamps not saved with blockers | Validate watch progress/history under blocking before changing network request filtering |
-| **P2 other** | [#390](https://github.com/reisxd/TizenTubeCobalt/issues/390) initial deep-link lost at cold start | Fix only with test exercising document replacement and consumption of initial deep link |
+| **P2 other** | [#390](https://github.com/reisxd/TizenTubeCobalt/issues/390) initial deep-link lost at cold start | Source fix `a482c51`: moved initial-link consumption from transient object construction to the first JavaScript property read, memoized per document. Static source contract green; real cold-start external-link test still required |
 
 ### Two different kinds of 'advertisement'
 
@@ -43,8 +43,8 @@ The PR for local video/channel masking is [TizenTube #720](https://github.com/re
 
 ## Validation gates
 
-- **Done at source/test level:** Video/channel blocking, user-agent persistence, Android surface/first-frame source port, safer updater, known ad-slot suppression. [Targeted Node/GN + 10 Java tests green](https://github.com/niakw/TizenTubeCobalt/actions/runs/42511658312).
-- **Still outstanding:** Full Cobalt Android build and signed APK, TV remote/playback tests, #374 remote main userscript integrity, real live-stream ad capture (#378), cold-start deep links (#390), companion JS integration and optional home rows (#382).
+- **Done at source/test level:** Video/channel blocking, user-agent persistence, Android surface/first-frame source port, safer updater, known ad-slot suppression, and lazy startup-link consumption. [21 Node contracts + 10 actual Java JUnit tests green](https://github.com/niakw/TizenTubeCobalt/actions/runs/42512086562).
+- **Still outstanding:** Full Cobalt Android build and signed APK, TV remote/playback tests, #374 remote main userscript integrity, real live-stream ad capture (#378), cold-start deep-link device validation (#390), companion JS integration and optional home rows (#382).
 - **GitHub Actions:** Past `autoroll_main.yaml` red runs came from an invalid empty schedule declaration; the fork has since replaced it with manual `workflow_dispatch`. Historical red runs are not proof that current source builds fail.
 
 **Release policy:** Do not advertise the upstream download as containing fork changes, and do not mark issues resolved solely because synthetic tests pass.
