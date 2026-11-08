@@ -82,6 +82,16 @@ jobs:
           set -euo pipefail
           git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$GITHUB_WORKSPACE/cobalt/depot_tools"
           echo "$GITHUB_WORKSPACE/cobalt/depot_tools" >> "$GITHUB_PATH"
+          # In Cobalt CI, DEPOT_TOOLS_UPDATE=0 disables the implicit bootstrap.
+          # Install depot_tools' own Python before gclient/gn, as done by the
+          # upstream .github/actions/depot_tools/action.yaml workflow.
+          export DEPOT_TOOLS_UPDATE=0
+          source "$GITHUB_WORKSPACE/cobalt/depot_tools/bootstrap_python3"
+          bootstrap_python3
+          test -s "$GITHUB_WORKSPACE/cobalt/depot_tools/python3_bin_reldir.txt" || {
+            echo "::error::depot_tools Python bootstrap incomplete"
+            exit 1
+          }
       - name: Sync Cobalt and Android dependencies
         working-directory: cobalt
         shell: bash
