@@ -1,6 +1,6 @@
 # TizenTube Cobalt fork — upstream triage (2026-11-08)
 
-**Snapshot:** fork `niakw/TizenTubeCobalt`, main `5394e8577499d05062c59030b99e32a1539af804`. Recheck heads and CI before implementing any entry. This document tracks **work outstanding**, not bugs fixed by merely adding documentation.
+**Updated:** 2026-11-08, after the PR #288 / #383 / #385 source ports and the ad-slot filter changes. Recheck the current main SHA and CI when implementing further changes. Source integration and Android runtime qualification are separate states.
 
 ## Pull requests
 
@@ -8,9 +8,9 @@
 | --- | --- | --- |
 | [#293](https://github.com/reisxd/TizenTubeCobalt/pull/293) Linux/Android GN dependency | Ported on main, commit `71ed496` | Requires full target build verification |
 | [#381](https://github.com/reisxd/TizenTubeCobalt/pull/381) Arabic glyph clipping | Ported on main, commit `f487e19` | Requires Android TV font render validation |
-| [#288](https://github.com/reisxd/TizenTubeCobalt/pull/288) persist `user_agent_override` | **Open / not ported**; upstream marked non-mergeable | Investigate unsupported-device/reloading symptom (#287), isolate persistence under current GlobalFeatures implementation, add restart regression test before porting |
-| [#383](https://github.com/reisxd/TizenTubeCobalt/pull/383) unnamed Android rendering/key handling patch | **Open / not ported** | Requires dedicated review: touches CobaltActivity input events, video surface visibility and first-frame audio/video sync. No blanket merge until playback and remote BACK tested |
-| [#385](https://github.com/reisxd/TizenTubeCobalt/pull/385) updater progress/retry/install flow | **Open / not ported** | Useful separate workstream; 9 files, Android installer/security surface; verify full GN, signing and TV installation |
+| [#288](https://github.com/reisxd/TizenTubeCobalt/pull/288) persist `user_agent_override` | **Adapted/ported on main**, `0563c4b`, C++ unit test `a58dc38` | Reboot/real-device persistence still unverified; upstream PR remains open |
+| [#383](https://github.com/reisxd/TizenTubeCobalt/pull/383) Android rendering/key handling | **Ported on main**, `d52d280` / `d57cd0f` | Surface visibility, first decoded frame and real remote key behavior need a compiled APK and TV testing; not a proven fix for mid-stream network drops |
+| [#385](https://github.com/reisxd/TizenTubeCobalt/pull/385) updater progress/retry/install flow | **Ported on main**, with Java-source GN integration corrected in `621ea03` | All **10 upstream downloader JUnit tests green**; needs full Android build, APK signing, installer and update-from-existing-version test. Companion frontend PR not integrated |
 | [#382](https://github.com/reisxd/TizenTubeCobalt/pull/382) home rows/Continue Watching | **Open / not ported** | Optional UI feature requiring companion JS changes; not a connectivity fix |
 
 The PR for local video/channel masking is [TizenTube #720](https://github.com/reisxd/TizenTube/pull/720) in a **different JavaScript repo**. A locally embedded, independently adapted implementation is present in this fork, with [scope and limits](NIAK_RECOMMENDATION_CONTROLS.md). It does not imply that the upstream PR was merged.
@@ -20,10 +20,10 @@ The PR for local video/channel masking is [TizenTube #720](https://github.com/re
 | Priority | Issue | Working diagnosis / acceptance criteria |
 | --- | --- | --- |
 | **P0 security** | [#374](https://github.com/reisxd/TizenTubeCobalt/issues/374) remotely loaded mutable userscript | Audit where userscript is loaded and whether its integrity is checked. Prefer signed APK-bundled bytes or an immutable version with hash verification and fail-closed behavior. Do **not** claim fixed by bundling the local *recommendation* script alone; the main userscript is separate |
-| **P1 playback** | [#320](https://github.com/reisxd/TizenTubeCobalt/issues/320) videos freezing, [#367](https://github.com/reisxd/TizenTubeCobalt/issues/367) UI stuttering, [#258](https://github.com/reisxd/TizenTubeCobalt/issues/258) crashes | Reproduce with exact Android TV device/version, APK architecture and 1080p versus 4K. Capture timing, codec, player errors, logcat, dropped frames, playback retry and whether YouTube official app behaves differently. Investigate video renderer **without** automatically applying #383 |
-| **P1 connectivity** | [#287](https://github.com/reisxd/TizenTubeCobalt/issues/287) user-agent override not persisted, [#369](https://github.com/reisxd/TizenTubeCobalt/issues/369) network error | Distinguish Android TV session/streaming failures from Samsung/Tizen proxy startup reports. Issue #369 currently reports a Samsung device, so it is **not evidence** that an Android TV streaming error has the same root cause. No speculative network retry loop |
+| **P1 playback** | [#320](https://github.com/reisxd/TizenTubeCobalt/issues/320) videos freezing, [#367](https://github.com/reisxd/TizenTubeCobalt/issues/367) UI stuttering, [#258](https://github.com/reisxd/TizenTubeCobalt/issues/258) crashes | PR #383 rendering/key patch ported; recommendation JSON processing made cheaper (`2e579294`). Neither is proof that network buffering or all freezes are resolved. Capture logcat, codecs, dropped frames and playback comparison on actual TV |
+| **P1 connectivity** | [#287](https://github.com/reisxd/TizenTubeCobalt/issues/287) user-agent override not persisted, [#369](https://github.com/reisxd/TizenTubeCobalt/issues/369) network error | User-agent preference persistence implemented, but not reboot-tested on TV. #369 reports a Samsung/Tizen proxy symptom, not evidence for Android TV stream drops. Avoid speculative network retry loops |
 | **P1 in-stream ads** | [#378](https://github.com/reisxd/TizenTubeCobalt/issues/378) skippable ads in live streams | Reproduce on a live stream, identify the player/InnerTube payload and client version; test ad suppression while preserving playback and video position |
-| **P2 home ads** | [#386](https://github.com/reisxd/TizenTubeCobalt/issues/386) featured/sponsored home cards | Compare fresh YouTube TV JSON renderer shapes; filter only confidently identified advertising content and do not remove organic shelves blindly |
+| **P2 home ads** | [#386](https://github.com/reisxd/TizenTubeCobalt/issues/386) featured/sponsored home cards | Added a **conservative** backstop for known `adSlotRenderer` entries in nested shelves/continuations (`8380efb`), respecting the existing ad-block switch; unknown sponsored formats remain unverified |
 | **P2 history** | [#361](https://github.com/reisxd/TizenTubeCobalt/issues/361) viewing timestamps not saved with blockers | Validate watch progress/history under blocking before changing network request filtering |
 | **P2 other** | [#390](https://github.com/reisxd/TizenTubeCobalt/issues/390) initial deep-link lost at cold start | Fix only with test exercising document replacement and consumption of initial deep link |
 
@@ -43,8 +43,8 @@ The PR for local video/channel masking is [TizenTube #720](https://github.com/re
 
 ## Validation gates
 
-- **Done:** Source-level local recommendation controls; targeted Node gate passed ([run](https://github.com/niakw/TizenTubeCobalt/actions/runs/42508882620)).
-- **Not done:** Full Cobalt Android build, APK signing, actual device validation, #374 remote script integrity, and upstream #288/#382/#383/#385 porting.
+- **Done at source/test level:** Video/channel blocking, user-agent persistence, Android surface/first-frame source port, safer updater, known ad-slot suppression. [Targeted Node/GN + 10 Java tests green](https://github.com/niakw/TizenTubeCobalt/actions/runs/42511658312).
+- **Still outstanding:** Full Cobalt Android build and signed APK, TV remote/playback tests, #374 remote main userscript integrity, real live-stream ad capture (#378), cold-start deep links (#390), companion JS integration and optional home rows (#382).
 - **GitHub Actions:** Past `autoroll_main.yaml` red runs came from an invalid empty schedule declaration; the fork has since replaced it with manual `workflow_dispatch`. Historical red runs are not proof that current source builds fail.
 
 **Release policy:** Do not advertise the upstream download as containing fork changes, and do not mark issues resolved solely because synthetic tests pass.
