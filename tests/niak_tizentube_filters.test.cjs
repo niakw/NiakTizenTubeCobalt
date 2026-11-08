@@ -121,6 +121,31 @@ test('Existing context menu gets actions only once', () => {
   const again = app.parse(response([already]));
   assert.equal(actionsOf(menuOf(itemsOf(again)[0])).filter((x) => x === 'NIAK_NOT_INTERESTED').length, 1);
 });
+test('Engagement panel remains available when a long-press menu is synthesized', () => {
+  const app = boot();
+  const item = tile();
+  item.tileRenderer.onLongPressCommand = {
+    showEngagementPanelEndpoint: {
+      identifier: { tag: 'engagement-panel' },
+      globalConfiguration: { params: 'feed-context' }
+    }
+  };
+  const r = app.parse(response([item]));
+  const menu = menuOf(itemsOf(r)[0]);
+  const hide = menu.find((m) =>
+    m?.menuServiceItemRenderer?.serviceEndpoint?.playlistEditEndpoint?.customAction?.action === 'NIAK_NOT_INTERESTED');
+  assert.equal(hide.menuServiceItemRenderer.serviceEndpoint.playlistEditEndpoint.customAction.parameters.panel.panelId, 'engagement-panel');
+});
+test('Blocked channel dialog updates in place after individual unblock', () => {
+  const app = boot();
+  app.command('NIAK_BLOCK_CHANNEL', { channel: { id: CHANNEL, name: 'Test Channel' } });
+  app.command('NIAK_MANAGE_FILTERS');
+  app.command('NIAK_UNBLOCK_CHANNEL', { key: 'id:' + CHANNEL });
+  const modals = app.outgoing.filter((x) => x?.openPopupAction?.popupType === 'MODAL');
+  assert.equal(modals.length, 2);
+  assert.equal(modals[1].openPopupAction.updateAction, true);
+  assert.equal(modals[1].openPopupAction.shouldMatchUniqueId, true);
+});
 test('Corrupt storage is ignored, non-YouTube origins are never patched', () => {
   const app = boot();
   app.storage.set('niak-tizentube-filters-v1', '{broken');
