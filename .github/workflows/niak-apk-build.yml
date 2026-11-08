@@ -1,0 +1,149 @@
+name: Niak Cobalt — APK builder
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-apk-build.yml'
+  workflow_dispatch:
+    inputs:
+      architecture:
+        type: choice
+        description: 'Android TV CPU'
+        options: [arm64, arm]
+        default: arm64
+      compile:
+        type: boolean
+        description: 'Compile on Linux x86_64 runner with label niak-cobalt-build'
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  runner-capacity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect actual standard runner capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Standard GitHub runner, inspection only — no native build"
+          uname -a
+          free -h
+          df -h "$GITHUB_WORKSPACE"
+          available=$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')
+          total_ram=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
+          {
+            echo "### Cobalt APK compilation prerequisites"
+            echo ""
+            echo "Disk available: $((available / 1024 / 1024)) GiB"
+            echo "Memory: $((total_ram / 1024 / 1024)) GiB"
+            echo ""
+            echo "This probe does not build or publish any APK."
+            echo "For a real build register a Linux x86_64 self-hosted runner"
+            echo "with label niak-cobalt-build, at least 100 GiB free disk,"
+            echo "at least 16 GiB RAM, Java 17 and the Android SDK."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  native-apk:
+    if: github.event_name == 'workflow_dispatch' && inputs.compile
+    runs-on: [self-hosted, linux, x64, niak-cobalt-build]
+    timeout-minutes: 360
+    steps:
+      - name: Check builder before fetching Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          free_disk=$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')
+          ram=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
+          if (( free_disk < 100 * 1024 * 1024 || ram < 15 * 1024 * 1024 )); then
+            echo "Insufficient resources: need >=100 GiB free and >=15 GiB RAM"; exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          path: cobalt/src
+          fetch-depth: 1
+          filter: blob:none
+          persist-credentials: false
+      - name: Get public depot_tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$GITHUB_WORKSPACE/cobalt/depot_tools"
+          echo "$GITHUB_WORKSPACE/cobalt/depot_tools" >> "$GITHUB_PATH"
+      - name: Sync Cobalt and Android dependencies
+        working-directory: cobalt
+        shell: bash
+        env:
+          DEPOT_TOOLS_UPDATE: '0'
+          DEPOT_TOOLS_REPORT_BUILD: '0'
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/cobalt/depot_tools:$PATH"
+          gclient config --unmanaged --name=src "https://github.com/$GITHUB_REPOSITORY.git"
+          printf "target_os = ['android']\n" >> .gclient
+          gclient sync --nohooks --shallow --no-history --revision "$TARGET_SHA"
+          gclient runhooks
+          test "$(git -C src rev-parse HEAD)" = "$TARGET_SHA"
+      - name: Prepare test-only debug signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [[ ! -f "$HOME/.android/debug.keystore" ]]; then
+            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Niak Cobalt TEST,O=Niak,C=FR" -keyalg RSA -keysize 2048 -validity 3650
+          fi
+      - name: GN and Ninja — genuine Cobalt APK
+        working-directory: cobalt/src
+        shell: bash
+        env:
+          ARCH: ${{ inputs.architecture }}
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/cobalt/depot_tools:$PATH"
+          cobalt/build/gn.py -p "android-$ARCH" -c qa --no-rbe
+          autoninja -j 4 -C "out/android-$ARCH"_"qa" cobalt_apk
+      - name: Verify actual generated APK
+        shell: bash
+        env:
+          ARCH: ${{ inputs.architecture }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/cobalt/src/out/android-$ARCH"_"qa"
+          mapfile -t files < <(find "$root" -maxdepth 4 -type f -name 'Cobalt.apk' -print)
+          if (( ${#files[@]} != 1 )); then
+            echo "Need exactly one built Cobalt.apk, got ${#files[@]}"; exit 1
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/validated-apk"
+          dst="$GITHUB_WORKSPACE/validated-apk/niak-cobalt-$ARCH-${REVISION:0:12}-TEST.apk"
+          cp "${files[0]}" "$dst"
+          python3 - "$dst" <<'PY'
+          import sys,zipfile,os
+          path=sys.argv[1]
+          assert os.path.getsize(path) > 10_000_000
+          with zipfile.ZipFile(path) as apk:
+              names=set(apk.namelist())
+              assert 'AndroidManifest.xml' in names
+              assert 'classes.dex' in names
+              assert any(x.startswith('lib/') and x.endswith('.so') for x in names)
+              assert apk.testzip() is None
+          print('Valid APK ZIP: manifest, dex and native libraries present')
+          PY
+          signer=$(command -v apksigner || find "$GITHUB_WORKSPACE/cobalt/src/third_party/android_sdk" -type f -name apksigner -print -quit)
+          test -n "$signer" || { echo 'apksigner unavailable'; exit 1; }
+          "$signer" verify --print-certs "$dst"
+          sha256sum "$dst" > "$dst.sha256"
+          echo "Fork APK from commit $REVISION; TEST debug-signed, not the original publisher signature"
+      - name: Upload test APK and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: niak-cobalt-${{ inputs.architecture }}-${{ github.sha }}-TEST
+          path: validated-apk/
+          if-no-files-found: error
+          retention-days: 30
