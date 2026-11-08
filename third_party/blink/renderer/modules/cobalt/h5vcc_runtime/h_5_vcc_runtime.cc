@@ -25,9 +25,9 @@ H5vccRuntime::H5vccRuntime(LocalDOMWindow& window)
     : ExecutionContextLifecycleObserver(window.GetExecutionContext()),
       remote_h5vcc_runtime_(window.GetExecutionContext()),
       deep_link_receiver_(this, window.GetExecutionContext()) {
+  // A transient document may be replaced while YouTube TV starts. Merely
+  // creating h5vcc.runtime must not clear the one-shot OS deep link.
   EnsureRemoteIsBound();
-  remote_h5vcc_runtime_->GetAndClearInitialDeepLinkSync(&initial_deep_link_);
-  LOG(INFO) << "H5vccRuntime initial DeepLink: " << initial_deep_link_;
 }
 
 void H5vccRuntime::ContextDestroyed() {
@@ -36,6 +36,12 @@ void H5vccRuntime::ContextDestroyed() {
 }
 
 String H5vccRuntime::initialDeepLink() {
+  if (!initial_deep_link_fetched_ && GetExecutionContext()) {
+    EnsureRemoteIsBound();
+    remote_h5vcc_runtime_->GetAndClearInitialDeepLinkSync(&initial_deep_link_);
+    initial_deep_link_fetched_ = true;
+    VLOG(1) << "H5vccRuntime initial deep link accessed by the document";
+  }
   return initial_deep_link_;
 }
 
