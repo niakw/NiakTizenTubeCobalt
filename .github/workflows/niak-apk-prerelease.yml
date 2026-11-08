@@ -1,0 +1,80 @@
+name: Niak Cobalt — verified test APK prerelease
+
+on:
+  workflow_run:
+    workflows: ['Niak Cobalt — APK builder']
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-test:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/niak-embed-tizentube.sh
+            cobalt/shell/BUILD.gn
+            cobalt/shell/browser/shell.cc
+          sparse-checkout-cone-mode: false
+      - name: Refuse a release without pinned main userscript and security guard
+        id: provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q '9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75' scripts/niak-embed-tizentube.sh \
+              && grep -q 'niak_upstream_tizentube.js' cobalt/shell/BUILD.gn \
+              && grep -q 'niak_tizentube_security_guard.js' cobalt/shell/BUILD.gn \
+              && grep -q 'niak_upstream_tizentube.js' cobalt/shell/browser/shell.cc; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping release: exact build commit predates security requirements" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Download genuine signed APK artifact
+        if: steps.provenance.outputs.eligible == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/apks"
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'niak-cobalt-*-TEST' --dir "$GITHUB_WORKSPACE/apks"
+          mapfile -t apks < <(find "$GITHUB_WORKSPACE/apks" -type f -name '*-TEST.apk')
+          (( ${#apks[@]} == 1 )) || { echo 'Expected exactly one genuine test APK'; exit 1; }
+          test "$(stat -c '%s' "${apks[0]}")" -gt 10000000
+          test -f "${apks[0]}.sha256"
+          expected=$(awk '{print $1}' "${apks[0]}.sha256")
+          actual=$(sha256sum "${apks[0]}" | awk '{print $1}')
+          test "$actual" = "$expected" || { echo 'APK SHA mismatch'; exit 1; }
+          unzip -t "${apks[0]}" | tail -1
+          echo "Artifact SHA-256 verified: $actual"
+      - name: Publish explicit test prerelease only
+        if: steps.provenance.outputs.eligible == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          short="${SOURCE_SHA:0:12}"
+          tag="niak-cobalt-test-$RUN_ID"
+          mapfile -t files < <(find "$GITHUB_WORKSPACE/apks" -type f \( -name '*-TEST.apk' -o -name '*-TEST.apk.sha256' \))
+          (( ${#files[@]} == 2 )) || exit 1
+          gh release create "$tag" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "Niak Cobalt Android TEST — $short" \
+            --prerelease \
+            --notes "TEST BUILD ONLY (not a stable production release). Real Cobalt source revision: $SOURCE_SHA. Contains pinned GPL TizenTube userscript, local filters and security guard. Debug signature differs from the original TizenTube publisher; Android may require removal of the official package and app data may be lost. Native APK integrity and signature checks passed in CI, but startup/login/remote/video playback have NOT been verified on a TV. Do not use as an automatic update."
