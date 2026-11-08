@@ -1,0 +1,74 @@
+name: Niak Cobalt — compiler cache smoke test
+
+# No Cobalt source sync, GN, or native APK compilation is done here.
+# This verifies that the cache can actually be reused on a fresh runner.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-apk-cache-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: niak-cobalt-cache-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  populate-cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
+    steps:
+      - name: Install same pinned sccache as the APK workflow
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Compile one tiny stable source into the GitHub cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cache-smoke
+          printf 'int niak_cache_probe(void) { return 27; }\n' > cache-smoke/probe.c
+          command -v sccache
+          command -v gcc
+          sccache gcc -O2 -c cache-smoke/probe.c -o cache-smoke/probe.o
+          test -s cache-smoke/probe.o
+          sccache --show-stats
+
+  verify-fresh-runner:
+    needs: populate-cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
+    steps:
+      - name: Install identical sccache on a different fresh runner
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Verify content-addressed cache hit across separate GitHub jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cache-smoke
+          printf 'int niak_cache_probe(void) { return 27; }\n' > cache-smoke/probe.c
+          sccache gcc -O2 -c cache-smoke/probe.c -o cache-smoke/probe.o
+          test -s cache-smoke/probe.o
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "$stats"
+          hits="$(printf '%s\n' "$stats" | awk '$1=="Cache" && $2=="hits" {print $3; exit}')"
+          if [[ ! "$hits" =~ ^[0-9]+$ ]] || (( hits == 0 )); then
+            echo "::error::No shared cache hit on the second clean runner; cannot promise incremental Cobalt builds"
+            exit 1
+          fi
+          {
+            echo "### Compiler cache check"
+            echo "Success: $hits cached compile(s) reused on a fresh runner."
+            echo "Only a tiny C source was compiled; this is NOT a Cobalt/Android APK build."
+          } >> "$GITHUB_STEP_SUMMARY"
