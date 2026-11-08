@@ -166,7 +166,7 @@ test('Unrelated player JSON bypasses recommendation traversal', () => {
   assert.equal(app.storageReads(), before);
 });
 
-test('One network response with multiple shelves reads storage only once', () => {
+test('One network response with multiple shelves reads each preference key once', () => {
   const app = boot();
   const input = response([tile()]);
   input.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content
@@ -175,7 +175,8 @@ test('One network response with multiple shelves reads storage only once', () =>
     });
   const before = app.storageReads();
   app.parse(input);
-  assert.equal(app.storageReads() - before, 1);
+  // One recommendation-state read + one ad-block setting read, not per shelf.
+  assert.equal(app.storageReads() - before, 2);
 });
 
 test('Modern lockupViewModel supports long-press and locally blocked channels', () => {
@@ -199,4 +200,41 @@ test('Modern lockupViewModel supports long-press and locally blocked channels', 
   assert.ok(actionsOf(items).includes('NIAK_BLOCK_CHANNEL'));
   app.command('NIAK_BLOCK_CHANNEL', { channel: { id: CHANNEL, name: 'Test Channel' } });
   assert.equal(itemsOf(app.parse(response([lockup]))).length, 0);
+});
+
+test('Known ad slot structures are removed from home shelves and continuations', () => {
+  const app = boot();
+  const ad = { adSlotRenderer: { slotId: 'paid-masthead' } };
+  const input = response([tile(), ad]);
+  input.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content
+    .sectionListRenderer.contents.push(ad, {
+      shelfRenderer: { title: {simpleText: 'Featured'}, content: {
+        horizontalListRenderer: {items: [tile('otherVIDEO1')]}
+      } }
+    });
+  const result = app.parse(input);
+  const sections = result.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content
+    .sectionListRenderer.contents;
+  assert.equal(sections.some((entry) => !!entry.adSlotRenderer), false);
+  assert.equal(itemsOf(result).length, 1);
+  assert.equal(sections.length, 2, 'non-ad editorial shelves must be preserved');
+
+  const continuation = app.parse({continuationContents: {
+    horizontalListContinuation: {items: [ad, tile()]}
+  }});
+  assert.equal(continuation.continuationContents.horizontalListContinuation.items.length, 1);
+});
+
+test('Explicit TizenTube ad-block off preserves ad slots', () => {
+  const app = boot();
+  app.storage.set('ytaf-configuration', JSON.stringify({enableAdBlock: false}));
+  const ad = {adSlotRenderer: {slotId: 'paid'}};
+  const input = response([tile(), ad]);
+  input.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content
+    .sectionListRenderer.contents.push(ad);
+  const result = app.parse(input);
+  const sections = result.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content
+    .sectionListRenderer.contents;
+  assert.equal(itemsOf(result).length, 2);
+  assert.equal(sections.some((entry) => !!entry.adSlotRenderer), true);
 });
