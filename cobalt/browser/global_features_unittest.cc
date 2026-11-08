@@ -183,6 +183,36 @@ TEST_F(GlobalFeaturesTest, SetAndGetSettingString) {
   EXPECT_EQ(*val, "hello");
 }
 
+TEST_F(GlobalFeaturesTest, UserAgentOverrideUsesPersistedPref) {
+  ASSERT_NE(instance_, nullptr);
+  auto* prefs = instance_->metrics_local_state();
+  ASSERT_NE(prefs, nullptr);
+  ASSERT_NE(prefs->FindPreference(
+                GlobalFeatures::kUserAgentOverridePrefName),
+            nullptr);
+
+  instance_->ClearSetting(GlobalFeatures::kUserAgentOverridePrefName);
+  instance_->SetSettings("unrelated_setting", std::string("not persisted"));
+  EXPECT_TRUE(
+      prefs->GetString(GlobalFeatures::kUserAgentOverridePrefName).empty());
+
+  const std::string compatibility_ua = "Cobalt/27 (compatible)";
+  instance_->SetSettings(GlobalFeatures::kUserAgentOverridePrefName,
+                         compatibility_ua);
+  EXPECT_EQ(prefs->GetString(GlobalFeatures::kUserAgentOverridePrefName),
+            compatibility_ua);
+  auto effective =
+      instance_->GetSetting(GlobalFeatures::kUserAgentOverridePrefName);
+  ASSERT_TRUE(effective.has_value());
+  EXPECT_EQ(std::get<std::string>(*effective), compatibility_ua);
+
+  instance_->ClearSetting(GlobalFeatures::kUserAgentOverridePrefName);
+  EXPECT_TRUE(
+      prefs->GetString(GlobalFeatures::kUserAgentOverridePrefName).empty());
+  EXPECT_FALSE(instance_->GetSetting(
+      GlobalFeatures::kUserAgentOverridePrefName).has_value());
+}
+
 TEST_F(GlobalFeaturesTest, GetSettingNotFound) {
   ASSERT_NE(instance_, nullptr);
   auto opt_val = instance_->GetSetting("non_existent_key");
