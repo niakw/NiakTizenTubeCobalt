@@ -14,7 +14,7 @@ on:
         default: arm64
       compile:
         type: boolean
-        description: 'Compile on Linux x86_64 runner with label niak-cobalt-build'
+        description: 'Manually compile on the GitHub Ubuntu runner'
         default: false
 
 permissions:
@@ -42,26 +42,33 @@ jobs:
             echo "Memory: $((total_ram / 1024 / 1024)) GiB"
             echo ""
             echo "This probe does not build or publish any APK."
-            echo "For a real build register a Linux x86_64 self-hosted runner"
-            echo "with label niak-cobalt-build, at least 100 GiB free disk,"
-            echo "at least 16 GiB RAM, Java 17 and the Android SDK."
+            echo "The actual public Ubuntu image has a larger volume than the minimum specification."
+            echo "A native Cobalt build may now be attempted if cleanup yields sufficient free space."
           } >> "$GITHUB_STEP_SUMMARY"
 
   native-apk:
-    if: github.event_name == 'workflow_dispatch' && inputs.compile
-    runs-on: [self-hosted, linux, x64, niak-cobalt-build]
+    if: github.event_name == 'push' || inputs.compile
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
-      - name: Check builder before fetching Chromium
+      - name: Clean unused Ubuntu SDKs and check actual space
         shell: bash
         run: |
           set -euo pipefail
           test "$(uname -s)" = Linux
           test "$(uname -m)" = x86_64
+          echo "Before cleanup:"
+          df -h "$GITHUB_WORKSPACE"
+          # Cobalt fetches its own Android dependencies. Remove preinstalled
+          # SDKs not used by Chromium; do not remove Java or the runner agent.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/share/powershell /usr/local/.ghcup /opt/hostedtoolcache/Python /opt/hostedtoolcache/Ruby
+          echo "After cleanup:"
+          df -h "$GITHUB_WORKSPACE"
           free_disk=$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')
           ram=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
-          if (( free_disk < 100 * 1024 * 1024 || ram < 15 * 1024 * 1024 )); then
-            echo "Insufficient resources: need >=100 GiB free and >=15 GiB RAM"; exit 1
+          echo "Free disk: $((free_disk / 1024 / 1024)) GiB; RAM: $((ram / 1024 / 1024)) GiB"
+          if (( free_disk < 85 * 1024 * 1024 || ram < 13 * 1024 * 1024 )); then
+            echo "Insufficient disk/RAM after cleanup, aborting before full source sync"; exit 1
           fi
       - uses: actions/checkout@v4
         with:
@@ -102,7 +109,7 @@ jobs:
         working-directory: cobalt/src
         shell: bash
         env:
-          ARCH: ${{ inputs.architecture }}
+          ARCH: ${{ inputs.architecture || 'arm64' }}
         run: |
           set -euo pipefail
           export PATH="$GITHUB_WORKSPACE/cobalt/depot_tools:$PATH"
@@ -111,7 +118,7 @@ jobs:
       - name: Verify actual generated APK
         shell: bash
         env:
-          ARCH: ${{ inputs.architecture }}
+          ARCH: ${{ inputs.architecture || 'arm64' }}
           REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -143,7 +150,7 @@ jobs:
       - name: Upload test APK and checksum
         uses: actions/upload-artifact@v4
         with:
-          name: niak-cobalt-${{ inputs.architecture }}-${{ github.sha }}-TEST
+          name: niak-cobalt-${{ inputs.architecture || 'arm64' }}-${{ github.sha }}-TEST
           path: validated-apk/
           if-no-files-found: error
           retention-days: 30
