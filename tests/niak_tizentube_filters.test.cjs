@@ -12,12 +12,13 @@ const VIDEO = 'abcDEF12345';
 const CHANNEL = 'UC' + 'z'.repeat(22);
 function boot(hostname = 'www.youtube.com') {
   const storage = new Map();
+  let storageReads = 0;
   const ticks = [];
   const outgoing = [];
   const window = {
     location: { hostname, hash: '#/' },
     localStorage: {
-      getItem: (key) => storage.has(key) ? storage.get(key) : null,
+      getItem: (key) => { storageReads++; return storage.has(key) ? storage.get(key) : null; },
       setItem: (key, value) => storage.set(key, value)
     },
     setInterval: (fn) => { ticks.push(fn); },
@@ -29,7 +30,7 @@ function boot(hostname = 'www.youtube.com') {
   vm.runInContext(script, context, { filename: 'niak_tizentube_filters.js' });
   ticks.forEach((fn) => fn());
   return {
-    window, storage, outgoing, parse: (data) => vm.runInContext('JSON.parse', context)(JSON.stringify(data)),
+    window, storage, outgoing, storageReads: () => storageReads, parse: (data) => vm.runInContext('JSON.parse', context)(JSON.stringify(data)),
     command: (action, parameters) => window._yttv.live.instance.resolveCommand({
       playlistEditEndpoint: { customAction: { action, parameters } }
     })
@@ -155,4 +156,47 @@ test('Corrupt storage is ignored, non-YouTube origins are never patched', () => 
   assert.equal(outside.window._yttv.live.instance.resolveCommand({
     playlistEditEndpoint: { customAction: { action: 'NIAK_NOT_INTERESTED', parameters: { videoId: VIDEO } } }
   }), false);
+});
+
+test('Unrelated player JSON bypasses recommendation traversal', () => {
+  const app = boot();
+  const before = app.storageReads();
+  const data = { contents: { player: { stats: new Array(1000).fill('x') } } };
+  assert.deepEqual(JSON.parse(JSON.stringify(app.parse(data))), data);
+  assert.equal(app.storageReads(), before);
+});
+
+test('One network response with multiple shelves reads storage only once', () => {
+  const app = boot();
+  const input = response([tile()]);
+  input.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content
+    .sectionListRenderer.contents.push({
+      shelfRenderer: { content: { horizontalListRenderer: { items: [tile('otherVIDEO1')] } } }
+    });
+  const before = app.storageReads();
+  app.parse(input);
+  assert.equal(app.storageReads() - before, 1);
+});
+
+test('Modern lockupViewModel supports long-press and locally blocked channels', () => {
+  const app = boot();
+  const lockup = { lockupViewModel: {
+    contentType: 'LOCKUP_CONTENT_TYPE_VIDEO', contentId: VIDEO,
+    rendererContext: { commandContext: { onTap: {
+      innertubeCommand: { watchEndpoint: { videoId: VIDEO } }
+    } } },
+    metadata: { lockupMetadataViewModel: {
+      title: { content: 'Modern video' },
+      metadata: { contentMetadataViewModel: { metadataRows: [{ metadataParts: [{
+        text: { content: 'Test Channel', browseEndpoint: { browseId: CHANNEL } }
+      }] }] } }
+    } }
+  } };
+  const first = app.parse(response([lockup]));
+  const model = itemsOf(first)[0].lockupViewModel;
+  const items = model.rendererContext.commandContext.onLongPress.innertubeCommand
+    .showMenuCommand.menu.menuRenderer.items;
+  assert.ok(actionsOf(items).includes('NIAK_BLOCK_CHANNEL'));
+  app.command('NIAK_BLOCK_CHANNEL', { channel: { id: CHANNEL, name: 'Test Channel' } });
+  assert.equal(itemsOf(app.parse(response([lockup]))).length, 0);
 });
