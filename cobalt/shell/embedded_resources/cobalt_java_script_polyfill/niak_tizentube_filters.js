@@ -287,9 +287,26 @@
   var nativeParse = JSON.parse;
   JSON.parse = function () {
     var data = nativeParse.apply(this, arguments);
-    // Player, comments and settings payloads do not contain video tile
-    // collections. Avoid scanning those large JSON documents on every parse.
     var source = arguments[0];
+    var isPlayerAds = typeof source === 'string' &&
+        (source.indexOf('"adPlacements"') !== -1 ||
+         source.indexOf('"adSlots"') !== -1 ||
+         source.indexOf('"playerAds"') !== -1);
+    // A normal VOD/live player response may contain top-level ad markers.
+    // Drop only structures already handled by the upstream TizenTube ad blocker,
+    // without rewriting streams, timing, captions or playback contexts.
+    if (isPlayerAds && data && typeof data === 'object' && !Array.isArray(data)) {
+      try {
+        if (adBlockingEnabled()) {
+          if (Array.isArray(data.adPlacements)) data.adPlacements = [];
+          if (Array.isArray(data.adSlots)) data.adSlots = [];
+          if (data.playerAds) data.playerAds = false;
+        }
+      } catch (error) {
+        console.warn('Niak filters: player-ad parsing unavailable', error);
+      }
+    }
+    // Avoid traversing large video streams and player settings JSON.
     if (typeof source === 'string' &&
         source.indexOf('"horizontalListRenderer"') === -1 &&
         source.indexOf('"gridRenderer"') === -1 &&
