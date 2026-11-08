@@ -38,3 +38,18 @@ test('User-Agent override has registered persistent storage, restore and clear p
   assert.match(cpp, /settings_\[kUserAgentOverridePrefName\] = stored;/);
   assert.match(tests, /UserAgentOverrideUsesPersistedPref/);
 });
+
+test('Android video surface is hidden when no frame rectangle is available', () => {
+  const android = read('cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java');
+  assert.match(android, /mVideoSurfaceView\.setAlpha\(0f\)/);
+  assert.match(android, /mVideoSurfaceView\.setAlpha\(videoSurfaceVisible \? 1f : 0f\)/);
+  assert.match(android, /setVideoSurfaceBounds\(\s*mVideoSurfaceX, mVideoSurfaceY, mVideoSurfaceWidth, mVideoSurfaceHeight\)/);
+  assert.match(android, /dispatchKeyEventToIme\(event\) \|\| super\.onKeyDown/);
+  assert.match(android, /dispatchKeyEventToIme\(event\) \|\| super\.onKeyUp/);
+});
+
+test('Starboard first frame can render before audio has advanced', () => {
+  const video = read('starboard/android/shared/video_render_algorithm_android.cc');
+  assert.match(video, /#else\s*\/\/ Paint the first decoded frame[\s\S]*?release_frames_after_audio_starts_\(true\)/);
+  assert.match(video, /if \(first_frame_released_ &&/);
+});
