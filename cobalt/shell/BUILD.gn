@@ -539,6 +539,7 @@ action("embed_polyfilled_javascript") {
   sources = [
     "embedded_resources/cobalt_java_script_polyfill/html_media_element_extension_on_java_bridge.js",
     "embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js",
+    "embedded_resources/cobalt_java_script_polyfill/niak_tizentube_security_guard.js",
     # Generated only from the SHA-256 verified, pinned TizenTube source.
     # Run scripts/niak-embed-tizentube.sh before gn gen.
     "embedded_resources/cobalt_java_script_polyfill/niak_upstream_tizentube.js",
