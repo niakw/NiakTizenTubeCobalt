@@ -81,8 +81,9 @@ bool H5vccTizenTube::InstallAppFromURL(
 #if BUILDFLAG(IS_ANDROID)
   auto* env = base::android::AttachCurrentThread();
   starboard::StarboardBridge* bridge = starboard::StarboardBridge::GetInstance();
-  bridge->InstallAppFromURL(env, url.Utf8().data());
-  return true;
+  // Report whether Android accepted the update request. The APK signature
+  // and version checks happen in CobaltUpdateActivity before installation.
+  return bridge->InstallAppFromURL(env, url.Utf8().data());
 #else
   return false;
 #endif // BUILDFLAG(IS_ANDROID)
