@@ -3,6 +3,10 @@ name: Niak Cobalt — APK builder
 # Full native builds use a fresh hosted VM unless a persistent cache exists.
 # Don't automatically start a cold 47k-task rebuild on every CI correction.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/niak-start-apk-build.txt'
   workflow_dispatch:
     inputs:
       architecture:
@@ -45,7 +49,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   native-apk:
-    if: inputs.compile
+    if: github.event_name == 'push' || inputs.compile
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -112,6 +116,10 @@ jobs:
           set -euo pipefail
           command -v sccache
           sccache --version
+          if [[ "${ACTIONS_CACHE_SERVICE_V2:-}" != on ]]; then
+            echo "::error::GitHub cache V2 disabled; this would hide the existing 18k Cobalt objects"
+            exit 1
+          fi
           if [[ -z "${ACTIONS_RESULTS_URL:-}" || -z "${ACTIONS_RUNTIME_TOKEN:-}" ]]; then
             echo "::error::No GitHub cache backend credentials. Aborting before expensive gclient sync."
             exit 1
