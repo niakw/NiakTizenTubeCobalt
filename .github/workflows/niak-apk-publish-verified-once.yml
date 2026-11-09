@@ -1,0 +1,77 @@
+name: Niak Cobalt — publish verified ARM64 TEST APK (one-time)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/niak-apk-publish-verified-once.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    if: github.repository == 'niakw/TizenTubeCobalt'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: '42584435361'
+      SOURCE_SHA: 'd289a929796ccea7396c8d29d860d7a971c12e2e'
+      APK_SHA: '3535547ecf6a154b3b85eef7353e71230c920b9d5b3a0bef91cff4d37d9a3bd8'
+      TAG: niak-cobalt-test-42584435361
+    steps:
+      - name: Verify successful build, exact source and no duplicate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" -q .conclusion)" = success
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" -q .head_sha)" = "$SOURCE_SHA"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "Already published"; exit 1; fi
+      - uses: actions/checkout@v4
+        with:
+          ref: d289a929796ccea7396c8d29d860d7a971c12e2e
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/niak-embed-tizentube.sh
+            cobalt/shell/BUILD.gn
+            cobalt/shell/browser/shell.cc
+          sparse-checkout-cone-mode: false
+      - name: Check pinned source and security guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          grep -Fq '9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75' scripts/niak-embed-tizentube.sh
+          grep -Fq niak_upstream_tizentube.js cobalt/shell/BUILD.gn
+          grep -Fq niak_tizentube_security_guard.js cobalt/shell/BUILD.gn
+          grep -Fq niak_upstream_tizentube.js cobalt/shell/browser/shell.cc
+      - name: Verify APK from immutable successful run
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verified
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern "niak-cobalt-arm64-$SOURCE_SHA-TEST" --dir verified
+          mapfile -t files < <(find verified -name '*-TEST.apk' -type f)
+          test "${#files[@]}" -eq 1
+          apk="${files[0]}"
+          test -f "$apk.sha256"
+          test "$(stat -c '%s' "$apk")" -gt 10000000
+          test "$(sha256sum "$apk" | awk '{print $1}')" = "$APK_SHA"
+          test "$(awk 'NR==1 {print $1}' "$apk.sha256")" = "$APK_SHA"
+          unzip -t "$apk" | tail -1
+          unzip -Z1 "$apk" > apk-contents.txt
+          grep -Fxq AndroidManifest.xml apk-contents.txt
+          grep -Fxq classes.dex apk-contents.txt
+          grep -Eq '^lib/arm64-v8a/.+\.so$' apk-contents.txt
+          signer=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner -type f | sort -V | tail -1)
+          test -x "$signer"
+          "$signer" verify --print-certs "$apk" | tee signature.txt
+          grep -Fq 'CN=Niak Cobalt TEST' signature.txt
+          echo "APK=$apk" >> "$GITHUB_ENV"
+      - name: Publish prerelease only (tag at current main; binary source SHA in notes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          notes="TEST ONLY — not stable. APK compiled from fork commit $SOURCE_SHA by successful Actions run $RUN_ID attempt 2 (not from release tag commit $GITHUB_SHA). Tag targets current main to avoid GitHub's workflow-change permission restriction; SHA and binary provenance are explicitly recorded. APK SHA-256: $APK_SHA. Android TV ARM64, Niak Cobalt TEST debug signature. Pinned GPL userscript and security guard checked. Different signature from official app; uninstall may be required, potentially losing data. No Android TV device test, login or video playback validation has been performed."
+          gh release create "$TAG" "$APK" "$APK.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Niak Cobalt Android TV ARM64 TEST — $RUN_ID" --prerelease --notes "$notes"
