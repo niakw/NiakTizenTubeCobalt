@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/niak-apk-cache-smoke.yml'
+      - 'scripts/niak-install-sccache.sh'
   workflow_dispatch:
 
 permissions:
@@ -24,10 +25,21 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
     steps:
-      - name: Install same pinned sccache as the APK workflow
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: actions/checkout@v4
         with:
-          version: v0.16.0
+          persist-credentials: false
+          sparse-checkout: scripts/niak-install-sccache.sh
+          sparse-checkout-cone-mode: false
+      - name: Install same pinned sccache as the APK workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/niak-install-sccache.sh
+      - name: Connect compiler cache to GitHub storage
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - name: Compile one tiny stable source into the GitHub cache
         shell: bash
         run: |
@@ -48,10 +60,21 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
     steps:
-      - name: Install identical sccache on a different fresh runner
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: actions/checkout@v4
         with:
-          version: v0.16.0
+          persist-credentials: false
+          sparse-checkout: scripts/niak-install-sccache.sh
+          sparse-checkout-cone-mode: false
+      - name: Install identical sccache on a different fresh runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/niak-install-sccache.sh
+      - name: Connect compiler cache to GitHub storage
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - name: Verify content-addressed cache hit across separate GitHub jobs
         shell: bash
         run: |
