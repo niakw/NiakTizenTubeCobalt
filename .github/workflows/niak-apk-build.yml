@@ -92,10 +92,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/niak-preflight-android-resources.py
-      - name: Install content-addressed sccache compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.16.0
+      - name: Install verified sccache 0.16.0 without fragile release-action downloads
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash cobalt/src/scripts/niak-install-sccache.sh
       - name: Connect sccache to GitHub Actions cache storage
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
