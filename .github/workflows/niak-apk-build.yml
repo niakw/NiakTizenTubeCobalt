@@ -3,10 +3,6 @@ name: Niak Cobalt — APK builder
 # Full native builds use a fresh hosted VM unless a persistent cache exists.
 # Don't automatically start a cold 47k-task rebuild on every CI correction.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/niak-start-apk-build.txt'
   workflow_dispatch:
     inputs:
       architecture:
@@ -49,7 +45,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   native-apk:
-    if: github.event_name == 'push' || inputs.compile
+    if: inputs.compile
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
