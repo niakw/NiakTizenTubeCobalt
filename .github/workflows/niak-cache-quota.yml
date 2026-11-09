@@ -1,0 +1,36 @@
+name: Niak Cobalt — cache quota diagnosis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-cache-quota.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect-cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Inspect GitHub Actions cache quota without deleting data
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "### GitHub Actions cache storage"
+          if gh api "repos/$GITHUB_REPOSITORY/actions/cache/usage" --jq '"Active cache count: " + (.active_caches_count|tostring) + "; bytes: " + (.active_caches_size_in_bytes|tostring)'; then
+            echo "Cache usage endpoint: OK"
+          else
+            echo "::warning::Cache usage endpoint not accessible with read-only token"
+          fi
+          echo "### Example cache entries (names only)"
+          if gh api "repos/$GITHUB_REPOSITORY/actions/caches?per_page=3" --jq '.actions_caches[]? | [.key, .size_in_bytes, .last_accessed_at] | @tsv'; then
+            echo "Cache list endpoint: OK"
+          else
+            echo "::warning::Cache listing not accessible with read-only token"
+          fi
