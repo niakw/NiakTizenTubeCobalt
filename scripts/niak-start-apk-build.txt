@@ -1,7 +1,7 @@
-Niak Cobalt Android TV native APK build request
-Requested source: main after verified cross-runner sccache smoke test.
-Target architecture: arm64
-Test status: 2026-11-08 / GN Android resource preflight and targeted checks green.
-Cache proof: https://github.com/niakw/TizenTubeCobalt/actions/runs/42532647644
-Reason for explicit start: manual workflow dispatch is unavailable through the current GitHub connector; this marker triggers exactly one workflow run on main.
-No production release without verified APK, SHA-256, signing and provenance.
+Niak Cobalt native Android TV ARM64 build (one explicit trigger).
+Reason: retry after run #42533264496 attempt 2 failed before build due GitHub sccache v0.16 asset HTTP 504.
+Install fix: scripts/niak-install-sccache.sh uses GitHub API asset and pins SHA-256.
+Cache fix: ACTIONS_CACHE_SERVICE_V2=on restores previous Cobalt cache objects.
+Validation: cross-runner smoke test #42584269058 passed with 100% cache hits and zero errors.
+Build target: main + pinned TizenTube security changes, android-arm64 qa, real APK.
+No stable release: TEST prerelease only after APK signature, SHA-256, zip integrity verified.
