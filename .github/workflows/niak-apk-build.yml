@@ -86,6 +86,18 @@ jobs:
           fetch-depth: 1
           filter: blob:none
           persist-credentials: false
+      - name: Validate requested Android ABI profile before expensive sync
+        working-directory: cobalt/src
+        shell: bash
+        env:
+          ARCH: ${{ inputs.architecture || 'arm64' }}
+        run: |
+          set -euo pipefail
+          case "$ARCH" in arm|arm64) ;; *) echo "Unsupported architecture: $ARCH"; exit 1 ;; esac
+          cfg="cobalt/build/configs/android-$ARCH/args.gn"
+          test -f "$cfg"
+          grep -Fxq "target_cpu = \"$ARCH\"" "$cfg"
+          echo "Verified GN Android $ARCH configuration"
       - name: Fast Android resource preflight
         working-directory: cobalt/src
         shell: bash
@@ -223,18 +235,9 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/validated-apk"
           dst="$GITHUB_WORKSPACE/validated-apk/niak-cobalt-$ARCH-${REVISION:0:12}-TEST.apk"
           cp "${files[0]}" "$dst"
-          python3 - "$dst" <<'PY'
-          import sys,zipfile,os
-          path=sys.argv[1]
-          assert os.path.getsize(path) > 10_000_000
-          with zipfile.ZipFile(path) as apk:
-              names=set(apk.namelist())
-              assert 'AndroidManifest.xml' in names
-              assert 'classes.dex' in names
-              assert any(x.startswith('lib/') and x.endswith('.so') for x in names)
-              assert apk.testzip() is None
-          print('Valid APK ZIP: manifest, dex and native libraries present')
-          PY
+          # Fail-closed on wrong native ABI: ARM32 needs armeabi-v7a / ELF32,
+          # ARM64 needs arm64-v8a / ELF64, even if the APK ZIP is otherwise valid.
+          python3 "$GITHUB_WORKSPACE/cobalt/src/scripts/niak-verify-apk-abi.py" "$dst" "$ARCH"
           signer=$(command -v apksigner || find "$GITHUB_WORKSPACE/cobalt/src/third_party/android_sdk" -type f -name apksigner -print -quit)
           test -n "$signer" || { echo 'apksigner unavailable'; exit 1; }
           "$signer" verify --print-certs "$dst"
