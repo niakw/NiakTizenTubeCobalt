@@ -24,6 +24,10 @@ jobs:
     env:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
+      # Same cache namespace reported by the successful 6-hour ARM64 build.
+      # The bare installer does not set the action's hashed cache namespace.
+      SCCACHE_GHA_CACHE_TO: 273b6d707536363955deed00cecdc6c2360788669f0d31a51242742f25d9a8ae
+      SCCACHE_GHA_CACHE_FROM: 273b6d707536363955deed00cecdc6c2360788669f0d31a51242742f25d9a8ae
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +63,10 @@ jobs:
     env:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_GHA_VERSION: niak-cobalt-android-qa-v1
+      # Same cache namespace reported by the successful 6-hour ARM64 build.
+      # The bare installer does not set the action's hashed cache namespace.
+      SCCACHE_GHA_CACHE_TO: 273b6d707536363955deed00cecdc6c2360788669f0d31a51242742f25d9a8ae
+      SCCACHE_GHA_CACHE_FROM: 273b6d707536363955deed00cecdc6c2360788669f0d31a51242742f25d9a8ae
     steps:
       - uses: actions/checkout@v4
         with:
