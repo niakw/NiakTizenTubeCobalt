@@ -22,6 +22,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/niak-embed-tizentube.sh
+            scripts/niak-verify-apk-abi.py
             cobalt/shell/BUILD.gn
             cobalt/shell/browser/shell.cc
           sparse-checkout-cone-mode: false
@@ -58,7 +59,14 @@ jobs:
           actual=$(sha256sum "${apks[0]}" | awk '{print $1}')
           test "$actual" = "$expected" || { echo 'APK SHA mismatch'; exit 1; }
           unzip -t "${apks[0]}" | tail -1
-          echo "Artifact SHA-256 verified: $actual"
+          # Validate native ELF class and ABI from APK, independently of build logs.
+          case "$(basename "${apks[0]}")" in
+            niak-cobalt-arm64-*-TEST.apk) arch=arm64 ;;
+            niak-cobalt-arm-*-TEST.apk) arch=arm ;;
+            *) echo "Unknown APK architecture naming"; exit 1 ;;
+          esac
+          python3 scripts/niak-verify-apk-abi.py "${apks[0]}" "$arch"
+          echo "Artifact SHA-256 and native $arch ABI verified: $actual"
       - name: Publish explicit test prerelease only
         if: steps.provenance.outputs.eligible == 'true'
         shell: bash
@@ -74,7 +82,7 @@ jobs:
           (( ${#files[@]} == 2 )) || exit 1
           gh release create "$tag" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$SOURCE_SHA" \
+            --target "$GITHUB_SHA" \
             --title "Niak Cobalt Android TEST — $short" \
             --prerelease \
-            --notes "TEST BUILD ONLY (not a stable production release). Real Cobalt source revision: $SOURCE_SHA. Contains pinned GPL TizenTube userscript, local filters and security guard. Debug signature differs from the original TizenTube publisher; Android may require removal of the official package and app data may be lost. Native APK integrity and signature checks passed in CI, but startup/login/remote/video playback have NOT been verified on a TV. Do not use as an automatic update."
+            --notes "TEST BUILD ONLY (not a stable production release). Exact binary source revision: $SOURCE_SHA (successful build run $RUN_ID); release tag points at $GITHUB_SHA only for GitHub Actions workflow-token compatibility. Contains pinned GPL TizenTube userscript, local filters and security guard. Debug signature differs from the original TizenTube publisher; Android may require removal of the official package and app data may be lost. Native APK integrity and signature checks passed in CI, but startup/login/remote/video playback have NOT been verified on a TV. Do not use as an automatic update."
