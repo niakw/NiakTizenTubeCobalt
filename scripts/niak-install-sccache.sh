@@ -71,6 +71,13 @@ export PATH="$HOME/.local/bin:$PATH"
 if [[ -n "${GITHUB_PATH:-}" ]]; then
   echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 fi
+# The Mozilla sccache-action additionally forces GitHub's Actions Cache v2.
+# Without this, the same sccache binary selects the legacy cache protocol,
+# cannot read the 18k already-populated v2 entries, and its writes fail.
+export ACTIONS_CACHE_SERVICE_V2=on
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "ACTIONS_CACHE_SERVICE_V2=on" >> "$GITHUB_ENV"
+fi
 sccache --version
 test "$(sccache --version)" = "sccache 0.16.0"
-echo "Installed sha256-verified sccache v0.16.0; compatible with previous Cobalt build version."
+echo "Installed sha256-verified sccache v0.16.0 with GitHub Actions Cache v2 enabled."
