@@ -420,3 +420,53 @@ test('Multiple YouTube TV resolver instances have independent command guards', (
   assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
   assert.equal(extraCommands.length, 0);
 });
+
+test('Home rows with non-default video styles get a usable long-press menu', () => {
+  const app = boot();
+  const item = tile();
+  item.tileRenderer.style = 'TILE_STYLE_YTLR_LARGE';
+  delete item.tileRenderer.onSelectCommand;
+  const initialHome = { contents: { tvBrowseRenderer: { content: {
+    richGridRenderer: { contents: [{ richItemRenderer: { content: item } }] }
+  } } } };
+  app.window.ytInitialData = initialHome;
+  const actions = actionsOf(menuOf(item));
+  assert.ok(actions.includes('NIAK_NOT_INTERESTED'));
+  assert.ok(actions.includes('NIAK_MANAGE_FILTERS'));
+  const hide = menuOf(item).find(m => m?.menuServiceItemRenderer?.serviceEndpoint
+    ?.playlistEditEndpoint?.customAction?.action === 'NIAK_NOT_INTERESTED');
+  app.window._yttv.live.instance.resolveCommand(hide.menuServiceItemRenderer.serviceEndpoint);
+  assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
+});
+
+test('Home lockup video with unknown style and without a watch endpoint gets menu', () => {
+  const app = boot();
+  const item = { lockupViewModel: {
+    contentType: 'LOCKUP_CONTENT_TYPE_UNSPECIFIED',
+    contentId: VIDEO,
+    rendererContext: { commandContext: {} }
+  } };
+  app.parse(response([item]));
+  const cmd = item.lockupViewModel.rendererContext.commandContext.onLongPress;
+  // JSON.parse builds a copy: assert the menu on the returned parsed item.
+  const parsed = app.parse(response([item]));
+  const lockup = itemsOf(parsed)[0].lockupViewModel;
+  const menu = lockup.rendererContext.commandContext.onLongPress.innertubeCommand
+    .showMenuCommand.menu.menuRenderer.items;
+  assert.ok(actionsOf(menu).includes('NIAK_NOT_INTERESTED'));
+  assert.equal(menu[0].menuNavigationItemRenderer.navigationEndpoint.watchEndpoint.videoId, VIDEO);
+});
+
+test('Explicit channel and playlist cards remain free of video feedback menus', () => {
+  const app = boot();
+  for (const type of ['CHANNEL', 'PLAYLIST', 'LOCKUP_CONTENT_TYPE_MIX']) {
+    const item = type.startsWith('LOCKUP') ? { lockupViewModel: {
+      contentType: type, contentId: VIDEO, rendererContext: { commandContext: {} }
+    } } : tile();
+    if (item.tileRenderer) item.tileRenderer.contentType = type;
+    const parsed = app.parse(response([item]));
+    const actual = itemsOf(parsed)[0];
+    if (actual.tileRenderer) assert.equal(actual.tileRenderer.onLongPressCommand, undefined, type);
+    else assert.equal(actual.lockupViewModel.rendererContext.commandContext.onLongPress, undefined, type);
+  }
+});
