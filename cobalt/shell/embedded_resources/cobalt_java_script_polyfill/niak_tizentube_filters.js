@@ -532,33 +532,39 @@
     wrapped.__niakFiltersPatched = true;
     return wrapped;
   }
+  function guardResolver(instance) {
+    var original = instance.resolveCommand;
+    if (instance.__niakResolverGuard) return;
+    var descriptor = Object.getOwnPropertyDescriptor(instance, 'resolveCommand');
+    if (descriptor && !descriptor.configurable) {
+      if (!original.__niakFiltersPatched && descriptor.writable)
+        instance.resolveCommand = wrapResolver(original);
+      return;
+    }
+    // Each instance needs its own closure; the YouTube TV runtime can expose
+    // multiple resolvers at once.
+    var current = wrapResolver(original);
+    try {
+      Object.defineProperty(instance, 'resolveCommand', {
+        configurable: true, enumerable: descriptor ? descriptor.enumerable : true,
+        get: function () { return current; },
+        set: function (next) {
+          if (typeof next === 'function' && next !== current)
+            current = wrapResolver(next);
+        }
+      });
+      Object.defineProperty(instance, '__niakResolverGuard', {
+        value: true, configurable: true
+      });
+    } catch (error) {
+      try { instance.resolveCommand = current; }
+      catch (unwritable) { console.warn('Niak filters: resolver not patchable', unwritable); }
+    }
+  }
   function installCommandPatch() {
     var instances = findResolve();
     for (var i = 0; i < instances.length; i++) {
-      var instance = instances[i], original = instance.resolveCommand;
-      if (instance.__niakResolverGuard) continue;
-      var descriptor = Object.getOwnPropertyDescriptor(instance, 'resolveCommand');
-      if (descriptor && !descriptor.configurable) {
-        if (!original.__niakFiltersPatched) instance.resolveCommand = wrapResolver(original);
-        continue;
-      }
-      // The upstream userscript patches resolveCommand after video startup.
-      // Keep the Niak handler outermost even when that later patch assigns a
-      // replacement function; a timer alone leaves a race where clicks vanish.
-      var current = wrapResolver(original);
-      try {
-        Object.defineProperty(instance, 'resolveCommand', {
-          configurable: true, enumerable: descriptor ? descriptor.enumerable : true,
-          get: function () { return current; },
-          set: function (next) {
-            if (typeof next === 'function' && next !== current)
-              current = wrapResolver(next);
-          }
-        });
-        Object.defineProperty(instance, '__niakResolverGuard', { value: true, configurable: true });
-      } catch (error) {
-        instance.resolveCommand = current;
-      }
+      guardResolver(instances[i]);
     }
   }
   // The first Home feed may be supplied as a pre-parsed global, unlike
