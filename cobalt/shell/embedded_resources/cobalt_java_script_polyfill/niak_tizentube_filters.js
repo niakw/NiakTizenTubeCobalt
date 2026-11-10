@@ -348,11 +348,17 @@
     walk(root, 0);
   }
 
-  // The installed TizenTube userscript may wrap JSON.parse too. Chaining from
-  // document-start keeps our filtering usable without replacing that script.
+  // TizenTube installs its own JSON.parse wrapper after this document-start
+  // script. Always run our menu deduplication AFTER the latest upstream parser.
+  // Earlier wrappers are retained for compatibility, but do not redecorate.
   var nativeParse = JSON.parse;
-  JSON.parse = function () {
-    var data = nativeParse.apply(this, arguments);
+  var parseDepth = 0;
+  function wrapParse(parser) {
+    return function () {
+    parseDepth++;
+    try {
+    var data = parser.apply(this, arguments);
+    if (parseDepth > 1) return data;
     var source = arguments[0];
     var isPlayerAds = typeof source === 'string' &&
         (source.indexOf('"adPlacements"') !== -1 ||
@@ -384,7 +390,28 @@
     try { decoratePayload(data); }
     catch (error) { console.warn('Niak filters: unable to process recommendations', error); }
     return data;
-  };
+    } finally { parseDepth--; }
+    };
+  }
+  var currentParse = wrapParse(nativeParse);
+  try {
+    var parseDescriptor = Object.getOwnPropertyDescriptor(JSON, 'parse');
+    if (parseDescriptor && !parseDescriptor.configurable) {
+      JSON.parse = currentParse;
+    } else {
+      Object.defineProperty(JSON, 'parse', {
+        configurable: true,
+        enumerable: parseDescriptor ? parseDescriptor.enumerable : false,
+        get: function () { return currentParse; },
+        set: function (next) {
+          if (typeof next === 'function' && next !== currentParse)
+            currentParse = wrapParse(next);
+        }
+      });
+    }
+  } catch (error) {
+    JSON.parse = currentParse;
+  }
   window.JSON.parse = JSON.parse;
 
   function findResolve() {
