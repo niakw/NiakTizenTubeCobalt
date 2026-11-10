@@ -10,7 +10,7 @@ const path = require('node:path');
 const script = fs.readFileSync(path.join(__dirname, '../cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js'), 'utf8');
 const VIDEO = 'abcDEF12345';
 const CHANNEL = 'UC' + 'z'.repeat(22);
-function boot(hostname = 'www.youtube.com') {
+function boot(hostname = 'www.youtube.com', initialHome = null) {
   const storage = new Map();
   let storageReads = 0;
   const ticks = [];
@@ -24,6 +24,9 @@ function boot(hostname = 'www.youtube.com') {
     setInterval: (fn) => { ticks.push(fn); },
     _yttv: { live: { instance: { resolveCommand: (cmd) => { outgoing.push(cmd); return false; } } } }
   };
+  if (initialHome) Object.defineProperty(window, 'ytInitialData', {
+    configurable: false, writable: false, value: initialHome
+  });
   const context = vm.createContext({ window, navigator: { language: 'fr-FR' }, console });
   // In a browser window.JSON === JSON; the vm fixture must mirror that.
   window.JSON = vm.runInContext('JSON', context);
@@ -469,4 +472,52 @@ test('Explicit channel and playlist cards remain free of video feedback menus', 
     if (actual.tileRenderer) assert.equal(actual.tileRenderer.onLongPressCommand, undefined, type);
     else assert.equal(actual.lockupViewModel.rendererContext.commandContext.onLongPress, undefined, type);
   }
+});
+
+test('Later TizenTube JSON.parse processing cannot reintroduce duplicate feedback choices', () => {
+  const app = boot();
+  const previous = app.window.JSON.parse;
+  let upstreamParses = 0;
+  // TizenTube's pinned adblock.js assigns a second JSON.parse after document start.
+  // Its restoreFeedbackMenuItems appends feedback items after the first parser.
+  app.window.JSON.parse = function () {
+    upstreamParses++;
+    const data = previous.apply(this, arguments);
+    const item = itemsOf(data)[0];
+    const menu = menuOf(item);
+    for (const action of ['NOT_INTERESTED', 'DONT_RECOMMEND_CHANNEL']) {
+      menu.push({ menuServiceItemRenderer: {
+        text: { simpleText: action },
+        serviceEndpoint: { customAction: {
+          action, parameters: { panelId: 'YT_TV_PANEL', params: 'native-params' }
+        } }
+      } });
+    }
+    return data;
+  };
+  const result = app.parse(response([tile()]));
+  const menu = menuOf(itemsOf(result)[0]);
+  const localActions = Array.from(menu, x =>
+    x?.menuServiceItemRenderer?.serviceEndpoint?.playlistEditEndpoint?.customAction?.action ||
+    x?.menuServiceItemRenderer?.serviceEndpoint?.customAction?.action
+  ).filter(Boolean);
+  assert.equal(upstreamParses, 1);
+  assert.equal(localActions.filter(x => x === 'NIAK_NOT_INTERESTED').length, 1);
+  assert.equal(localActions.filter(x => x === 'NIAK_DONT_RECOMMEND').length, 1);
+  assert.equal(localActions.includes('NOT_INTERESTED'), false);
+  assert.equal(localActions.includes('DONT_RECOMMEND_CHANNEL'), false);
+  const endpoint = menu.find(x => x?.menuServiceItemRenderer?.serviceEndpoint
+    ?.customAction?.action === 'NIAK_NOT_INTERESTED')
+    ?.menuServiceItemRenderer?.serviceEndpoint;
+  assert.ok(endpoint);
+  app.window._yttv.live.instance.resolveCommand(endpoint);
+  assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
+});
+
+test('Read-only initial Home payload is still decorated without replacing its property', () => {
+  const initial = response([tile()]);
+  const app = boot('www.youtube.com', initial);
+  assert.equal(app.window.ytInitialData, initial);
+  assert.equal(Object.getOwnPropertyDescriptor(app.window, 'ytInitialData').configurable, false);
+  assert.ok(actionsOf(menuOf(itemsOf(initial)[0])).includes('NIAK_NOT_INTERESTED'));
 });
