@@ -202,6 +202,54 @@ test('Modern lockupViewModel supports long-press and locally blocked channels', 
   assert.equal(itemsOf(app.parse(response([lockup]))).length, 0);
 });
 
+test('Initial Home global gets its long-press menu before any JSON.parse call', () => {
+  const app = boot();
+  const initial = response([tile()]);
+  app.window.ytInitialData = initial;
+  assert.equal(app.window.ytInitialData, initial);
+  assert.deepEqual(actionsOf(menuOf(itemsOf(initial)[0])), [
+    'NIAK_NOT_INTERESTED', 'NIAK_DONT_RECOMMEND', 'NIAK_BLOCK_CHANNEL', 'NIAK_MANAGE_FILTERS'
+  ]);
+  // The pre-parsed initial feed is not JSON network data, so this test must not call app.parse.
+});
+
+test('Home rich-grid wrapper and nested watch command get a menu without a contentId', () => {
+  const app = boot();
+  const video = tile();
+  delete video.tileRenderer.contentId;
+  video.tileRenderer.style = 'TILE_STYLE_YTLR_FEATURED';
+  video.tileRenderer.onSelectCommand = { commandExecutorCommand: { commands: [
+    { innertubeCommand: { watchEndpoint: { videoId: VIDEO } } }
+  ] } };
+  const initial = { contents: { tvBrowseRenderer: { content: {
+    tvSurfaceContentRenderer: { content: { richGridRenderer: {
+      contents: [{ richItemRenderer: { content: video } }]
+    } } }
+  } } } };
+  app.window.ytInitialData = initial;
+  const menu = menuOf(video);
+  assert.ok(actionsOf(menu).includes('NIAK_NOT_INTERESTED'));
+  assert.equal(menu[0].menuNavigationItemRenderer.navigationEndpoint.watchEndpoint.videoId, VIDEO);
+});
+
+test('Home fallback stays video-only and preserves native navigation', () => {
+  const app = boot();
+  const channel = { tileRenderer: {
+    style: 'TILE_STYLE_YTLR_CHANNEL', contentId: 'notavideoid',
+    onSelectCommand: { browseEndpoint: { browseId: CHANNEL } }
+  } };
+  const item = tile();
+  const native = { menuServiceItemRenderer: { text: { simpleText: 'Save' } } };
+  item.tileRenderer.onLongPressCommand = { innertubeCommand: {
+    showMenuCommand: { menu: { menuRenderer: { items: [native] } } }
+  } };
+  app.window.ytInitialData = response([channel, item]);
+  assert.equal(channel.tileRenderer.onLongPressCommand, undefined);
+  assert.equal(item.tileRenderer.onLongPressCommand.innertubeCommand.showMenuCommand.menu.menuRenderer.items[0], native);
+  assert.equal(actionsOf(item.tileRenderer.onLongPressCommand.innertubeCommand.showMenuCommand.menu.menuRenderer.items)
+    .filter((action) => action === 'NIAK_NOT_INTERESTED').length, 1);
+});
+
 test('Known ad slot structures are removed from home shelves and continuations', () => {
   const app = boot();
   const ad = { adSlotRenderer: { slotId: 'paid-masthead' } };
