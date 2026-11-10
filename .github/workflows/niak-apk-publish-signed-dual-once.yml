@@ -120,9 +120,11 @@ jobs:
             fi
             unzip -t "$apk" >/dev/null
             python3 scripts/niak-verify-apk-abi.py "$apk" "$arch"
-            cert="$("$signer" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1 | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-            if [[ "$cert" != "$expected" ]]; then
-              echo "::error::Wrong signing certificate in $arch APK."; exit 1
+            cert_details="$("$signer" verify --print-certs "$apk")"
+            printf '%s\n' "$cert_details" | grep -i 'certificate SHA-256 digest' || true
+            cert="$(printf '%s\n' "$cert_details" | sed -nE 's/^[[:space:]]*Signer #1 certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]{64}).*/\1/p' | head -n1 | tr '[:lower:]' '[:upper:]')"
+            if [[ -z "$cert" || "$cert" != "$expected" ]]; then
+              echo "::error::Signer mismatch or unrecognized apksigner format on $arch: actual='$cert', expected='$expected'"; exit 1
             fi
             echo "Verified $arch: ZIP, ELF ABI, artifact SHA256 $actual_sha, permanent certificate $cert" >> "$GITHUB_STEP_SUMMARY"
           done
