@@ -90,9 +90,10 @@
   }
   function videoNavigation(item) {
     var t = item && item.tileRenderer, l = item && item.lockupViewModel;
-    return watchNavigation(t ? t.onSelectCommand :
-      l && l.rendererContext && l.rendererContext.commandContext &&
-      l.rendererContext.commandContext.onTap, 0);
+    var context = l && l.rendererContext && l.rendererContext.commandContext;
+    return watchNavigation(t ? (t.onSelectCommand || t.navigationEndpoint ||
+      t.onTapCommand || t.onTap) :
+      context && (context.onTap || context.onTapCommand || context.onSelectCommand), 0);
   }
   function videoId(item) {
     var id = item && (item.tileRenderer && item.tileRenderer.contentId ||
@@ -158,7 +159,8 @@
     if (!item) return false;
     var t = item.tileRenderer, l = item.lockupViewModel;
     return !!(t && (t.style === 'TILE_STYLE_YTLR_DEFAULT' ||
-        (videoId(item) && videoNavigation(item))) ||
+        (videoId(item) && (videoNavigation(item) || t.style === 'TILE_STYLE_YTLR_FEATURED' ||
+          t.contentType === 'VIDEO'))) ||
       l && (l.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO' ||
         (!l.contentType && videoId(item) && videoNavigation(item))));
   }
@@ -213,7 +215,10 @@
       return cmd.showMenuCommand.menu.menuRenderer.items;
     }
     var id = videoId(item), navigation = videoNavigation(item);
-    if (!id || !navigation) return null;
+    if (!id) return null;
+    // Home occasionally ships a valid video ID but no explicit watch command.
+    // Preserve the native endpoint when present; use a minimal watch command otherwise.
+    if (!navigation) navigation = { watchEndpoint: { videoId: id } };
     var items = [{ menuNavigationItemRenderer: {
       text: { runs: [{ text: fr ? 'Lire' : 'Play' }] },
       navigationEndpoint: navigation, trackingParams: null
@@ -226,6 +231,7 @@
     } };
     if (t) t.onLongPressCommand = data;
     else {
+      if (!l.rendererContext) l.rendererContext = {};
       if (!l.rendererContext.commandContext) l.rendererContext.commandContext = {};
       l.rendererContext.commandContext.onLongPress = { innertubeCommand: data };
     }
@@ -233,23 +239,45 @@
   }
   function decorateMenu(item) {
     if (!isVideo(item) || !videoId(item)) return;
-    // Capture the engagement panel before synthesizing a long-press menu;
-    // some tiles expose a panel endpoint but do not have a menu yet.
     var panel = feedbackPanel(item);
     var items = menuFor(item);
     if (!items) return;
-    if (items.some(function (m) {
-      var c = m && m.menuServiceItemRenderer && m.menuServiceItemRenderer.serviceEndpoint;
-      return c && c.playlistEditEndpoint && c.playlistEditEndpoint.customAction &&
-        c.playlistEditEndpoint.customAction.action === 'NIAK_NOT_INTERESTED';
-    })) return;
-    var channel = channelInfo(item);
-    items.push(serviceItem(text.hide, 'NIAK_NOT_INTERESTED', { videoId: videoId(item), panel: panel }));
-    if (channel) {
-      items.push(serviceItem(text.dont, 'NIAK_DONT_RECOMMEND', { channel: channel, panel: panel }));
-      items.push(serviceItem(text.block, 'NIAK_BLOCK_CHANNEL', { channel: channel }));
+    var channel = channelInfo(item), id = videoId(item);
+    var seen = {};
+    // TizenTube itself can add the two feedback actions. Reuse those entries
+    // instead of appending a second pair, while routing them to our local
+    // persistence handler. Keep unrelated YouTube service commands untouched.
+    for (var i = 0; i < items.length; i++) {
+      var renderer = items[i] && items[i].menuServiceItemRenderer;
+      var action = renderer && actionOf(renderer.serviceEndpoint);
+      if (!action || typeof action.action !== 'string') continue;
+      var name = action.action;
+      if (name === 'NOT_INTERESTED') {
+        action.action = 'NIAK_NOT_INTERESTED';
+        action.parameters = { videoId: id, panel: panel || action.parameters || null };
+        name = action.action;
+      } else if (name === 'DONT_RECOMMEND_CHANNEL') {
+        action.action = 'NIAK_DONT_RECOMMEND';
+        action.parameters = { channel: channel, panel: panel || action.parameters || null };
+        name = action.action;
+      }
+      if (name.indexOf('NIAK_') !== 0) continue;
+      if (seen[name]) {
+        items.splice(i--, 1);
+      } else {
+        seen[name] = true;
+      }
     }
-    items.push(serviceItem(text.manage, 'NIAK_MANAGE_FILTERS', null));
+    if (!seen.NIAK_NOT_INTERESTED)
+      items.push(serviceItem(text.hide, 'NIAK_NOT_INTERESTED', { videoId: id, panel: panel }));
+    if (channel) {
+      if (!seen.NIAK_DONT_RECOMMEND)
+        items.push(serviceItem(text.dont, 'NIAK_DONT_RECOMMEND', { channel: channel, panel: panel }));
+      if (!seen.NIAK_BLOCK_CHANNEL)
+        items.push(serviceItem(text.block, 'NIAK_BLOCK_CHANNEL', { channel: channel }));
+    }
+    if (!seen.NIAK_MANAGE_FILTERS)
+      items.push(serviceItem(text.manage, 'NIAK_MANAGE_FILTERS', null));
   }
   // The main TizenTube userscript already removes adSlotRenderer in some
   // home layouts. This backstop covers nested and continuation shelves, without
@@ -277,7 +305,9 @@
   }
   function decoratePayload(root) {
     if (!root || typeof root !== 'object' || Array.isArray(root)) return;
-    if (!root.contents && !root.continuationContents) return;
+    if (!root.contents && !root.continuationContents &&
+        !root.onResponseReceivedActions && !root.onResponseReceivedEndpoints &&
+        !root.frameworkUpdates) return;
     // Read localStorage once per network response instead of once per shelf.
     var state = readState();
     var blockAds = adBlockingEnabled();
@@ -346,7 +376,8 @@
         source.indexOf('"horizontalListContinuation"') === -1 &&
         source.indexOf('"gridContinuation"') === -1 &&
          source.indexOf('"tileRenderer"') === -1 &&
-         source.indexOf('"lockupViewModel"') === -1) return data;
+         source.indexOf('"lockupViewModel"') === -1 &&
+        source.indexOf('"richGridRenderer"') === -1) return data;
     try { decoratePayload(data); }
     catch (error) { console.warn('Niak filters: unable to process recommendations', error); }
     return data;
@@ -467,36 +498,67 @@
       delete s3.channelNames[k]; writeState(s3); toast(text.restored); showManage(true);
     }
   }
+  function isNiakCommand(command) {
+    var a = actionOf(command);
+    return a && typeof a.action === 'string' && a.action.indexOf('NIAK_') === 0 ? a : null;
+  }
+  function wrapResolver(original) {
+    if (original.__niakFiltersPatched) return original;
+    var wrapped = function (cmd) {
+      var direct = isNiakCommand(cmd) ||
+        cmd && cmd.innertubeCommand && isNiakCommand(cmd.innertubeCommand);
+      if (direct) {
+        handle(direct.action, direct.parameters);
+        return true;
+      }
+      var executor = cmd && cmd.commandExecutorCommand;
+      if (executor && Array.isArray(executor.commands)) {
+        var pending = [], local = false;
+        executor.commands.forEach(function (command) {
+          var a = isNiakCommand(command);
+          if (a) { handle(a.action, a.parameters); local = true; }
+          else pending.push(command);
+        });
+        if (local) {
+          if (!pending.length) return true;
+          var forwarded = Object.assign({}, cmd, {
+            commandExecutorCommand: Object.assign({}, executor, { commands: pending })
+          });
+          return original.call(this, forwarded, arguments[1]);
+        }
+      }
+      return original.apply(this, arguments);
+    };
+    wrapped.__niakFiltersPatched = true;
+    return wrapped;
+  }
   function installCommandPatch() {
     var instances = findResolve();
     for (var i = 0; i < instances.length; i++) {
       var instance = instances[i], original = instance.resolveCommand;
-      if (original.__niakFiltersPatched) continue;
-      var wrapped = (function (og) {
-        return function (cmd) {
-          var a = actionOf(cmd);
-          if (a && typeof a.action === 'string' && a.action.indexOf('NIAK_') === 0) {
-            handle(a.action, a.parameters);
-            return true;
+      if (instance.__niakResolverGuard) continue;
+      var descriptor = Object.getOwnPropertyDescriptor(instance, 'resolveCommand');
+      if (descriptor && !descriptor.configurable) {
+        if (!original.__niakFiltersPatched) instance.resolveCommand = wrapResolver(original);
+        continue;
+      }
+      // The upstream userscript patches resolveCommand after video startup.
+      // Keep the Niak handler outermost even when that later patch assigns a
+      // replacement function; a timer alone leaves a race where clicks vanish.
+      var current = wrapResolver(original);
+      try {
+        Object.defineProperty(instance, 'resolveCommand', {
+          configurable: true, enumerable: descriptor ? descriptor.enumerable : true,
+          get: function () { return current; },
+          set: function (next) {
+            if (typeof next === 'function' && next !== current)
+              current = wrapResolver(next);
           }
-          if (cmd && cmd.commandExecutorCommand && Array.isArray(cmd.commandExecutorCommand.commands)) {
-            var commands = cmd.commandExecutorCommand.commands;
-            var allLocal = commands.length > 0 && commands.every(function (command) {
-              var a = actionOf(command);
-              return a && typeof a.action === 'string' && a.action.indexOf('NIAK_') === 0;
-            });
-            if (allLocal) {
-              commands.forEach(function (command) {
-                var a = actionOf(command); handle(a.action, a.parameters);
-              });
-              return true;
-            }
-          }
-          return og.apply(this, arguments);
-        };
-      })(original);
-      wrapped.__niakFiltersPatched = true;
-      instance.resolveCommand = wrapped;
+        });
+        Object.defineProperty(instance, '__niakResolverGuard', { value: true, configurable: true });
+      } catch (error) {
+        instance.resolveCommand = current;
+      }
     }
   }
   // The first Home feed may be supplied as a pre-parsed global, unlike
