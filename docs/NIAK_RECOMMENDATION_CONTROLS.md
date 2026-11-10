@@ -1,6 +1,6 @@
 # Niak fork — Android TV video/channel hiding
 
-**Status: Cobalt source integrated; 21 targeted Node checks and 10 Java updater tests green; Android APK/device validation not yet performed.**
+**Status: Cobalt code and Home/search regression tests integrated; targeted Node and Java updater CI validated. The revised menus have NOT yet been validated on a physical Android TV or in a newly signed APK.**
 
 The one active implementation is:
 
@@ -25,7 +25,7 @@ With a video tile selected on the YouTube TV home page, **hold OK** for the long
 
 Preferences are saved in YouTube TV localStorage on that device under `niak-tizentube-filters-v1`; hidden video IDs are capped at 1,000 and channel entries at 250. Labels are available in French and English. No separate app or JavaScript addon install is required **once an APK has been built from this fork**.
 
-The script augments existing long-press menu commands where present and synthesizes a minimal menu if a supported tile lacks one. Filtering is applied when YouTube TV parses a refreshed recommendation grid/shelf/continuation. Already-rendered items may remain visible until the next refresh. History, personal library and playlists are explicitly exempt.
+The script augments existing long-press menu commands where present and synthesizes a minimal menu if a supported tile lacks one. It also inspects late or read-only Home feed globals, catches Home video cards with a valid content ID but missing selection endpoint, merges native TizenTube feedback choices rather than duplicating them, and keeps its local action interceptor outermost when the upstream userscript replaces the TV command resolver after startup. Filtering is applied when YouTube TV parses a refreshed recommendation grid/shelf/continuation. Already-rendered items may remain visible until the next refresh. History, personal library and playlists are explicitly exempt.
 
 ## Differences from upstream PR #720
 
