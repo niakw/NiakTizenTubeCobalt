@@ -163,7 +163,10 @@
     // Explicit channel, playlist and mix cards must still remain untouched.
     if (!videoId(item)) return false;
     var type = (t && t.contentType || l && l.contentType || '');
-    if (typeof type === 'string' && /CHANNEL|PLAYLIST|COLLECTION|MIX/i.test(type))
+    var style = (t && t.style || l && l.style || '');
+    // A channel tile may coincidentally have an 11-character content ID.
+    // Reject explicit non-video styles before synthesizing a menu.
+    if (/CHANNEL|PLAYLIST|COLLECTION|MIX/i.test(String(type) + ' ' + String(style)))
       return false;
     return !!(t || l);
   }
