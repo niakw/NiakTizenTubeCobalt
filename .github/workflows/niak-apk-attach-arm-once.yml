@@ -1,0 +1,118 @@
+name: Niak Cobalt — attach verified ARM32 APK to existing TEST prerelease
+
+# Runs once when committed to main. Never compiles Cobalt or creates a new release.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/niak-apk-attach-arm-once.yml']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  attach-arm32:
+    if: github.repository == 'niakw/NiakTizenTubeCobalt'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: niak-cobalt-test-42584435361
+      ARM_RUN: '42701798360'
+      ARM_SOURCE: fe1005f5518a82a3306cbcf64d9319375f7c35e5
+      ARM_SHA256: 1a3baa5162470be9d41c657f17e5b6277a47014764c399a2429253e40224b214
+      ARM64_SHA256: 3535547ecf6a154b3b85eef7353e71230c920b9d5b3a0bef91cff4d37d9a3bd8
+      ARM_FILE: niak-cobalt-arm-fe1005f5518a-TEST.apk
+      ARM64_FILE: niak-cobalt-arm64-d289a929796c-TEST.apk
+    steps:
+      - name: Verify immutable successful ARM32 build and existing ARM64 TEST prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARM_RUN" -q '.conclusion')" = success
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARM_RUN" -q '.head_sha')" = "$ARM_SOURCE"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" -q '.prerelease')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" -q '.draft')" = false
+          existing64="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" -q ".assets[] | select(.name == \"$ARM64_FILE\") | .digest")"
+          test "$existing64" = "sha256:$ARM64_SHA256"
+          existing64checksum="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" -q ".assets[] | select(.name == \"$ARM64_FILE.sha256\") | .name")"
+          test "$existing64checksum" = "$ARM64_FILE.sha256"
+      - uses: actions/checkout@v4
+        with:
+          ref: fe1005f5518a82a3306cbcf64d9319375f7c35e5
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/niak-embed-tizentube.sh
+            scripts/niak-verify-apk-abi.py
+            cobalt/shell/BUILD.gn
+            cobalt/shell/browser/shell.cc
+          sparse-checkout-cone-mode: false
+      - name: Verify source guard and provenance from actual ARM32 compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ARM_SOURCE"
+          grep -Fq '9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75' scripts/niak-embed-tizentube.sh
+          grep -Fq 'niak_upstream_tizentube.js' cobalt/shell/BUILD.gn
+          grep -Fq 'niak_tizentube_security_guard.js' cobalt/shell/BUILD.gn
+          grep -Fq 'niak_upstream_tizentube.js' cobalt/shell/browser/shell.cc
+      - name: Download and independently verify ARM32 artifact, SHA-256, real ELF ABI and TEST signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p arm32
+          gh run download "$ARM_RUN" --repo "$GITHUB_REPOSITORY" \
+            --pattern "niak-cobalt-arm-$ARM_SOURCE-TEST" --dir arm32
+          mapfile -t apks < <(find arm32 -type f -name '*-TEST.apk')
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          test "$(basename "$apk")" = "$ARM_FILE"
+          test -f "$apk.sha256"
+          test "$(sha256sum "$apk" | awk '{print $1}')" = "$ARM_SHA256"
+          test "$(awk 'NR==1{print $1}' "$apk.sha256")" = "$ARM_SHA256"
+          python3 scripts/niak-verify-apk-abi.py "$apk" arm
+          signer=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name apksigner | sort -V | tail -1)
+          test -x "$signer"
+          "$signer" verify --print-certs "$apk" | tee signature.txt
+          grep -Fq 'CN=Niak Cobalt TEST' signature.txt
+          echo "APK=$apk" >> "$GITHUB_ENV"
+          echo "ARM32 source=$ARM_SOURCE, run=$ARM_RUN, SHA-256=$ARM_SHA256, ELF32/armeabi-v7a confirmed" >> "$GITHUB_STEP_SUMMARY"
+      - name: Add only missing ARM32 files to existing ARM64 prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_api="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+          existing="$(gh api "$release_api" -q ".assets[] | select(.name == \"$ARM_FILE\") | .digest")"
+          if [[ -z "$existing" ]]; then
+            gh release upload "$TAG" "$APK" --repo "$GITHUB_REPOSITORY"
+          else
+            test "$existing" = "sha256:$ARM_SHA256"
+          fi
+          existing_checksum="$(gh api "$release_api" -q ".assets[] | select(.name == \"$ARM_FILE.sha256\") | .name")"
+          if [[ -z "$existing_checksum" ]]; then
+            gh release upload "$TAG" "$APK.sha256" --repo "$GITHUB_REPOSITORY"
+          else
+            test "$existing_checksum" = "$ARM_FILE.sha256"
+          fi
+          test "$(gh api "$release_api" -q ".assets[] | select(.name == \"$ARM_FILE\") | .digest")" = "sha256:$ARM_SHA256"
+          test "$(gh api "$release_api" -q ".assets[] | select(.name == \"$ARM64_FILE\") | .digest")" = "sha256:$ARM64_SHA256"
+      - name: Update shared TEST release notes without disturbing ARM64 assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > release-notes.txt
+          if ! grep -Fq 'ARM32 additional build:' release-notes.txt; then
+            cat >> release-notes.txt <<EOF
+
+          ARM32 additional build: $ARM_RUN attempt 2; real fork source commit $ARM_SOURCE.
+          ARM32 APK: $ARM_FILE. SHA-256: $ARM_SHA256. Native ABI armeabi-v7a, ZIP, Android signature verified (Niak Cobalt TEST). The original ARM64 APK remains on this prerelease: $ARM64_FILE, SHA-256 $ARM64_SHA256, built from d289a929796ccea7396c8d29d860d7a971c12e2e (run 42584435361).
+          Choose ARM (32-bit Android TV) or ARM64 (64-bit Android TV) based on the device's Android OS ABI. Both are debug-signed test builds; because each build uses a transient signing certificate, signatures may differ. These APKs have NOT been validated for login, UI, remote or video playback on an Android TV device. This is NOT a stable release.
+          EOF
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease \
+            --title "Niak Cobalt Android TV ARM + ARM64 — TEST" \
+            --notes-file release-notes.txt
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" -q '.prerelease')" = true
+          echo "Existing ARM64 prerelease now includes genuine ARM32 APK and checksum" >> "$GITHUB_STEP_SUMMARY"
