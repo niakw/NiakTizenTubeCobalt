@@ -1,12 +1,10 @@
 name: Niak Cobalt — one-shot permanent APK signer preflight
 
-# Triggered only by the initial addition of this workflow to main.
-# NO Cobalt sync, APK build, release or temporary signing key.
+# Manually start only after both permanent signing settings are saved.
+# Fails before any Cobalt sync/compilation when signing is unavailable.
+# The two cache-backed builds are dispatched once after verification.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/niak-signer-preflight-once.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
