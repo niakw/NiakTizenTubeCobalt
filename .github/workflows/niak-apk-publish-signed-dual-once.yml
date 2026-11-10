@@ -122,7 +122,7 @@ jobs:
             python3 scripts/niak-verify-apk-abi.py "$apk" "$arch"
             cert_details="$("$signer" verify --print-certs "$apk")"
             printf '%s\n' "$cert_details" | grep -i 'certificate SHA-256 digest' || true
-            cert="$(printf '%s\n' "$cert_details" | sed -nE 's/^[[:space:]]*Signer #1 certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]{64}).*/\1/p' | head -n1 | tr '[:lower:]' '[:upper:]')"
+            cert="$(printf '%s\n' "$cert_details" | sed -nE 's/^.*certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]{64}).*/\1/p' | head -n1 | tr '[:lower:]' '[:upper:]')"
             if [[ -z "$cert" || "$cert" != "$expected" ]]; then
               echo "::error::Signer mismatch or unrecognized apksigner format on $arch: actual='$cert', expected='$expected'"; exit 1
             fi
