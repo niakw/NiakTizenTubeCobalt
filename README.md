@@ -23,7 +23,7 @@ Cobalt is a lightweight, cross-platform application container and runtime for HT
 - ➕ **More to come!** Request features via [issues](https://github.com/reisxd/TizenTube/issues/new).
 
 > [!IMPORTANT]
-> **Source fork:** the GitHub release links below point to the official upstream TizenTube Cobalt APKs, **not** builds of this fork. Commits made here are not included in those APKs. To use fork-specific changes, a separately built and signed APK is required; no fork-specific APK release is currently available.
+> **Source fork:** the upstream download button below points to official TizenTube Cobalt, not this fork. Historical Niak APK prereleases were compiled with temporary debug keys and are **not safe upgrade candidates**. Future fork builds are gated on a single permanent owner-controlled signing certificate; none should be installed until that identity is configured and validated.
 >
 > **Component boundary:** This fork now embeds an independent Cobalt-side port of the video/channel hiding controls described in [TizenTube PR #720](https://github.com/reisxd/TizenTube/pull/720). It is not a merge of the TizenTube JavaScript PR and does not replace the upstream userscript. More advanced upstream feedback prompts may differ.
 
@@ -38,7 +38,7 @@ This fork adds a **document-start JavaScript extension bundled into the Cobalt A
 
 Filtering applies to recommendation shelves, grids, and continuations after the **next feed refresh**. Library, history, and playlist pages are deliberately exempt. The extension saves preferences in app-local storage (`niak-tizentube-filters-v1`) and does not require another patched TizenTube repository. It has English/French labels.
 
-**Limits:** The displayed controls and modal still require a real Android TV device test. The lightweight CI validates JavaScript syntax, menu structures, persistence, filters and native resource embedding; it **does not compile or sign an APK**. The official upstream APK linked below **does not contain these fork changes**. Local blocks are not synchronized to your Google account, and optional feedback requests can fail if YouTube changes its API.
+**Limits:** Home and search menu fixes pass the targeted JS checks, but their real-world interaction still requires an Android TV device test. The lightweight CI validates JavaScript syntax, menu structures, persistence, filters and native resource embedding; it **does not compile or sign an APK**. The official upstream APK linked below **does not contain these fork changes**. Local blocks are not synchronized to your Google account, and optional feedback requests can fail if YouTube changes its API.
 
 [Read implementation and test limitations](docs/NIAK_RECOMMENDATION_CONTROLS.md) · [View Niak video filters CI](https://github.com/niakw/TizenTubeCobalt/actions/workflows/niak-cobalt-filters.yml)
 
@@ -46,7 +46,7 @@ Filtering applies to recommendation shelves, grids, and continuations after the 
 
 The fork has a [native Android APK build workflow](https://github.com/niakw/TizenTubeCobalt/actions/workflows/niak-apk-build.yml) for ARM/ARM64, with binary integrity and signing verification. **A successful Node/Java check is not an APK.** Do not use the official upstream download button as a substitute for a fork build.
 
-The main TizenTube userscript is generated from a [pinned Git commit and verified SHA-256](docs/NIAK_APK_BUILD_AND_SECURITY.md) before GN compilation, instead of executing the mutable CDN version. An Android test APK may have a different debug signature from the official app and may require uninstalling the existing application. No production release will be represented as complete until a genuine signed APK is verified.
+The main TizenTube userscript is generated from a [pinned Git commit and verified SHA-256](docs/NIAK_APK_BUILD_AND_SECURITY.md) before GN compilation, instead of executing the mutable CDN version. GitHub Actions now refuses native APK compilation without an owner-controlled keystore in the `NIAK_COBALT_SIGNING_KEYSTORE_B64` repository secret and its matching `NIAK_COBALT_SIGNING_CERT_SHA256` variable. The same certificate signs ARM and ARM64 and remains stable across builds; automatic generation of temporary signing keys is forbidden. The first switch from the official app or a historical temporary-key APK **cannot** be an in-place upgrade without that earlier private key. Later Niak builds signed with the same permanent key can update in place when Android version requirements are met. No production release is claimed until physical Android TV validation.
 
 ## ⬇️ Download
 
