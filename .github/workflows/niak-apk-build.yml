@@ -98,6 +98,18 @@ jobs:
           test -f "$cfg"
           grep -Fxq "target_cpu = \"$ARCH\"" "$cfg"
           echo "Verified GN Android $ARCH configuration"
+      - name: Require a permanent signer before any costly native compilation
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.NIAK_COBALT_SIGNING_KEYSTORE_B64 }}
+          CERT_SHA256: ${{ vars.NIAK_COBALT_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_B64" || -z "$CERT_SHA256" ]]; then
+            echo "::error::Permanent Niak signing identity not configured. Set NIAK_COBALT_SIGNING_KEYSTORE_B64 (secret) and NIAK_COBALT_SIGNING_CERT_SHA256 (variable). Refusing a disposable certificate."
+            exit 1
+          fi
+          echo "Owner-managed signer is configured; both ABIs must use this one certificate"
       - name: Fast Android resource preflight
         working-directory: cobalt/src
         shell: bash
@@ -173,29 +185,34 @@ jobs:
           test -s cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_upstream_tizentube.js
           echo "TizenTube build SHA256: 9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75" >> "$GITHUB_STEP_SUMMARY"
           echo "Pinned TizenTube main userscript included in GN source inputs"
-      - name: Prepare test-only debug signing certificate
+      - name: Install and verify the same persistent owner-controlled signing key
         shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.NIAK_COBALT_SIGNING_KEYSTORE_B64 }}
+          CERT_SHA256: ${{ vars.NIAK_COBALT_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
-          # cobalt/android/BUILD.gn sets keystore_path to
-          # "../../../../.android/debug.keystore", which resolves to the
-          # WORKSPACE root from cobalt/src/cobalt/android. The generated
-          # Ninja rule also references ../../.android from the output tree.
-          # Supply the SAME transient test certificate at both resolved paths.
-          # Neither copy is committed or reused as a production signing key.
+          # Cobalt's GN/Siso configuration expects the alias androiddebugkey,
+          # password android and a debug.keystore at both resolved paths.
+          # These are only compatibility names; the PRIVATE KEY is a persistent
+          # owner-managed GitHub Actions secret, never generated on a runner.
           keystore="$GITHUB_WORKSPACE/.android/debug.keystore"
           from_output="$GITHUB_WORKSPACE/cobalt/src/.android/debug.keystore"
           mkdir -p "$(dirname "$keystore")" "$(dirname "$from_output")"
-          if [[ ! -f "$keystore" ]]; then
-            keytool -genkeypair -keystore "$keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Niak Cobalt TEST,O=Niak,C=FR" -keyalg RSA -keysize 2048 -validity 3650
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          details="$(keytool -list -v -keystore "$keystore" -storepass android -alias androiddebugkey)"
+          actual="$(grep -m1 'SHA256:' <<< "$details" | cut -d: -f2- | tr -d ' :\r\n' | tr '[:lower:]' '[:upper:]')"
+          expected="$(printf '%s' "$CERT_SHA256" | tr -d ' :\r\n' | tr '[:lower:]' '[:upper:]')"
+          if [[ -z "$actual" || "$actual" != "$expected" ]]; then
+            echo "::error::The owner signing key does not match the pinned public certificate fingerprint"
+            exit 1
           fi
           cp "$keystore" "$from_output"
-          for file in "$keystore" "$from_output"; do
-            test -s "$file"
-            keytool -list -keystore "$file" -storepass android -alias androiddebugkey >/dev/null
-          done
+          chmod 600 "$keystore" "$from_output"
           test "$(sha256sum "$keystore" | awk '{print $1}')" = "$(sha256sum "$from_output" | awk '{print $1}')"
-          echo "Verified identical debug keystore at both GN/Siso resolved locations"
+          echo "Pinned permanent certificate verified (SHA-256): $actual" >> "$GITHUB_STEP_SUMMARY"
       - name: GN and Ninja — genuine Cobalt APK
         working-directory: cobalt/src
         shell: bash
@@ -225,6 +242,7 @@ jobs:
         env:
           ARCH: ${{ inputs.architecture || 'arm64' }}
           REVISION: ${{ github.sha }}
+          CERT_SHA256: ${{ vars.NIAK_COBALT_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
           root="$GITHUB_WORKSPACE/cobalt/src/out/android-$ARCH"_"qa"
@@ -233,20 +251,27 @@ jobs:
             echo "Need exactly one built Cobalt.apk, got ${#files[@]}"; exit 1
           fi
           mkdir -p "$GITHUB_WORKSPACE/validated-apk"
-          dst="$GITHUB_WORKSPACE/validated-apk/niak-cobalt-$ARCH-${REVISION:0:12}-TEST.apk"
+          dst="$GITHUB_WORKSPACE/validated-apk/niak-cobalt-$ARCH-${REVISION:0:12}-SIGNED-QA.apk"
           cp "${files[0]}" "$dst"
           # Fail-closed on wrong native ABI: ARM32 needs armeabi-v7a / ELF32,
           # ARM64 needs arm64-v8a / ELF64, even if the APK ZIP is otherwise valid.
           python3 "$GITHUB_WORKSPACE/cobalt/src/scripts/niak-verify-apk-abi.py" "$dst" "$ARCH"
           signer=$(command -v apksigner || find "$GITHUB_WORKSPACE/cobalt/src/third_party/android_sdk" -type f -name apksigner -print -quit)
           test -n "$signer" || { echo 'apksigner unavailable'; exit 1; }
-          "$signer" verify --print-certs "$dst"
+          cert_details="$("$signer" verify --print-certs "$dst")"
+          echo "$cert_details"
+          actual_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<< "$cert_details" | head -n1 | tr -d ' :\r\n' | tr '[:lower:]' '[:upper:]')"
+          expected_cert="$(printf '%s' "$CERT_SHA256" | tr -d ' :\r\n' | tr '[:lower:]' '[:upper:]')"
+          if [[ -z "$actual_cert" || "$actual_cert" != "$expected_cert" ]]; then
+            echo "::error::Output APK certificate differs from the pinned Niak signing identity"
+            exit 1
+          fi
           sha256sum "$dst" > "$dst.sha256"
-          echo "Fork APK from commit $REVISION; TEST debug-signed, not the original publisher signature"
-      - name: Upload test APK and checksum
+          echo "Fork APK from $REVISION; stable Niak signer SHA-256 $actual_cert; not the original publisher key" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload owner-signed QA APK and checksum
         uses: actions/upload-artifact@v4
         with:
-          name: niak-cobalt-${{ inputs.architecture || 'arm64' }}-${{ github.sha }}-TEST
+          name: niak-cobalt-${{ inputs.architecture || 'arm64' }}-${{ github.sha }}-SIGNED-QA
           path: validated-apk/
           if-no-files-found: error
           retention-days: 30
