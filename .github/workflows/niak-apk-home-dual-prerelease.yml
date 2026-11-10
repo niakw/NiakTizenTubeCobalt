@@ -1,0 +1,112 @@
+name: Niak Cobalt — publish verified Home-menu dual-ABI TEST build
+
+on:
+  workflow_run:
+    workflows: ['Niak Cobalt — APK builder']
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: niak-cobalt-home-20261110-test-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'niakw/NiakTizenTubeCobalt' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'build/home-longpress-20261110' &&
+      github.event.workflow_run.head_sha == 'a2c824c479d085b1b477f47963ea4e44fa880549' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: a2c824c479d085b1b477f47963ea4e44fa880549
+      RUN_ARM: '42798597317'
+      RUN_ARM64: '42798602668'
+      TAG: niak-cobalt-home-longpress-20261110-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a2c824c479d085b1b477f47963ea4e44fa880549
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/niak-verify-apk-abi.py
+            cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js
+          sparse-checkout-cone-mode: false
+      - name: Require both exact immutable successful full APK runs
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          grep -Fq 'installInitialFeedHook' cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js
+          ready=true
+          for id in "$RUN_ARM" "$RUN_ARM64"; do
+            json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+            for prop in head_sha head_branch event name; do
+              actual="$(jq -r ".$prop" <<< "$json")"
+              case "$prop" in
+                head_sha) expected="$SOURCE_SHA" ;;
+                head_branch) expected='build/home-longpress-20261110' ;;
+                event) expected='workflow_dispatch' ;;
+                name) expected='Niak Cobalt — APK builder' ;;
+              esac
+              test "$actual" = "$expected"
+            done
+            if [[ "$(jq -r '.conclusion // "pending"' <<< "$json")" != success ]]; then ready=false; fi
+          done
+          if [[ "$ready" != true ]]; then
+            echo "Not publishing: both builds must be successful; this run will be re-triggered by next completion." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+      - name: Download and verify signed ARM32 and ARM64 artifacts and SHA-256
+        if: steps.gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          short="${SOURCE_SHA:0:12}"
+          for arch in arm arm64; do
+            case "$arch" in
+              arm) run="$RUN_ARM" ;;
+              arm64) run="$RUN_ARM64" ;;
+            esac
+            mkdir -p "download/$arch"
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" \
+              --pattern "niak-cobalt-$arch-$SOURCE_SHA-TEST" --dir "download/$arch"
+            mapfile -t apks < <(find "download/$arch" -type f -name "niak-cobalt-$arch-$short-TEST.apk")
+            test "${#apks[@]}" -eq 1
+            apk="${apks[0]}"
+            test -s "$apk.sha256"
+            expected="$(awk 'NR==1{print $1}' "$apk.sha256")"
+            actual="$(sha256sum "$apk" | awk '{print $1}')"
+            test "$expected" = "$actual"
+            test "$(stat -c '%s' "$apk")" -gt 10000000
+            python3 scripts/niak-verify-apk-abi.py "$apk" "$arch"
+            unzip -t "$apk" | tail -1
+            cp "$apk" "$apk.sha256" dist/
+            echo "$arch: $actual | run $run | source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          done
+          test "$(find dist -name '*.apk' | wc -l)" -eq 2
+          test "$(find dist -name '*.sha256' | wc -l)" -eq 2
+      - name: Publish a single separate TEST prerelease without altering existing releases
+        if: steps.gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite any assets." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" --prerelease \
+            --title 'Niak Cobalt Home long-press fix — Android ARM + ARM64 TEST' \
+            --notes "TEST BUILD ONLY. Both APKs were compiled from the same source revision $SOURCE_SHA with the Home long-press fix. ARM32 run $RUN_ARM and ARM64 run $RUN_ARM64 independently passed native APK validation, ELF ABI verification, SHA-256 checks and debug signing during compilation. Each architecture may have a different temporary debug signature; the official TizenTube publisher signature is not used. Physical Android TV interaction, login and playback have NOT been validated. Previous releases are left untouched. This is not a stable or in-place update."
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | tee release-assets.txt
+          test "$(grep -c '\.apk$' release-assets.txt)" -eq 2
+          echo "Published combined verified ARM32 + ARM64 TEST prerelease $TAG" >> "$GITHUB_STEP_SUMMARY"
