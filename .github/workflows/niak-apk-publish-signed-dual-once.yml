@@ -108,7 +108,8 @@ jobs:
             name="niak-cobalt-$arch-$SOURCE_SHA-SIGNED-QA"
             mkdir -p "verified/$arch"
             gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "verified/$arch"
-            apk="verified/$arch/$name.apk"
+            short_sha="$(printf '%s' "$SOURCE_SHA" | cut -c1-12)"
+            apk="verified/$arch/niak-cobalt-$arch-$short_sha-SIGNED-QA.apk"
             test -s "$apk"
             test -s "$apk.sha256"
             test "$(stat -c '%s' "$apk")" -gt 10000000
@@ -132,7 +133,8 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             for arch in arm arm64; do
-              name="niak-cobalt-$arch-$SOURCE_SHA-SIGNED-QA.apk"
+              short_sha="$(printf '%s' "$SOURCE_SHA" | cut -c1-12)"
+              name="niak-cobalt-$arch-$short_sha-SIGNED-QA.apk"
               gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name" || {
                 echo "::error::Existing release lacks $name; refusing partial or conflicting release."; exit 1;
               }
