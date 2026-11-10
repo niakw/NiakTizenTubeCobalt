@@ -484,6 +484,10 @@ test('Later TizenTube JSON.parse processing cannot reintroduce duplicate feedbac
     upstreamParses++;
     const data = previous.apply(this, arguments);
     const item = itemsOf(data)[0];
+    // The real upstream addLongPress creates the menu before inserting actions.
+    if (!item.tileRenderer.onLongPressCommand) item.tileRenderer.onLongPressCommand = {
+      showMenuCommand: { menu: { menuRenderer: { items: [] } } }
+    };
     const menu = menuOf(item);
     for (const action of ['NOT_INTERESTED', 'DONT_RECOMMEND_CHANNEL']) {
       menu.push({ menuServiceItemRenderer: {
