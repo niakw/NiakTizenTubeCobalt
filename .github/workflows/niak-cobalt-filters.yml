@@ -8,6 +8,8 @@ on:
       - 'cobalt/shell/BUILD.gn'
       - 'cobalt/build/generate_data_header.py'
       - 'tests/*.test.cjs'
+      - '.github/workflows/niak-apk-build.yml'
+      - '.github/workflows/niak-apk-prerelease.yml'
       - 'scripts/niak-embed-tizentube.sh'
       - 'cobalt/shell/browser/shell.cc'
       - 'cobalt/browser/global_features*'
@@ -33,6 +35,8 @@ on:
       - 'cobalt/shell/embedded_resources/cobalt_java_script_polyfill/**'
       - 'cobalt/shell/BUILD.gn'
       - 'tests/*.test.cjs'
+      - '.github/workflows/niak-apk-build.yml'
+      - '.github/workflows/niak-apk-prerelease.yml'
       - 'scripts/niak-embed-tizentube.sh'
       - 'cobalt/shell/browser/shell.cc'
       - 'cobalt/browser/global_features*'
@@ -89,6 +93,8 @@ jobs:
             cobalt/shell/embedded_resources/cobalt_java_script_polyfill
             scripts/niak-embed-tizentube.sh
             tests
+            .github/workflows/niak-apk-build.yml
+            .github/workflows/niak-apk-prerelease.yml
           sparse-checkout-cone-mode: false
       - name: JavaScript syntax and behavior
         run: |
