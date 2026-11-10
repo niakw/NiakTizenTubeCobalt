@@ -419,6 +419,39 @@
   }
   window.JSON.parse = JSON.parse;
 
+  // The upstream TizenTube script can replace JSON.parse later in startup and
+  // append native feedback actions AFTER our first decoration pass. Keep the
+  // final result decorated too, without blocking or rewriting the upstream parser.
+  function decorateLateParse(parser) {
+    return function () {
+      var data = parser.apply(this, arguments), source = arguments[0];
+      if (typeof source === 'string' &&
+          (source.indexOf('"tileRenderer"') !== -1 ||
+           source.indexOf('"lockupViewModel"') !== -1 ||
+           source.indexOf('"richGridRenderer"') !== -1)) {
+        try { decoratePayload(data); }
+        catch (error) { console.warn('Niak filters: late parser decoration unavailable', error); }
+      }
+      return data;
+    };
+  }
+  try {
+    var parserDescriptor = Object.getOwnPropertyDescriptor(JSON, 'parse');
+    if (!parserDescriptor || parserDescriptor.configurable) {
+      var activeParser = JSON.parse;
+      Object.defineProperty(JSON, 'parse', {
+        configurable: true, enumerable: parserDescriptor ? parserDescriptor.enumerable : false,
+        get: function () { return activeParser; },
+        set: function (next) {
+          if (typeof next === 'function' && next !== activeParser)
+            activeParser = decorateLateParse(next);
+        }
+      });
+    }
+  } catch (error) {
+    console.warn('Niak filters: unable to guard late parser replacement', error);
+  }
+
   function findResolve() {
     var yttv = window._yttv;
     if (!yttv || typeof yttv !== 'object') return [];
