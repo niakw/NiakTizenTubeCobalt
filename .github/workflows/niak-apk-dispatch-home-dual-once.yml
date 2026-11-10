@@ -1,0 +1,42 @@
+name: Niak Cobalt — start pinned Home-menu ARM and ARM64 builds once
+
+# One-shot dispatcher: self-triggered by this file's initial push to main.
+# Runs two existing, cache-enabled builds concurrently without building Cobalt here.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-apk-dispatch-home-dual-once.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch-both:
+    if: github.repository == 'niakw/NiakTizenTubeCobalt'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_REF: build/home-longpress-20261110
+      SOURCE_SHA: a2c824c479d085b1b477f47963ea4e44fa880549
+    steps:
+      - name: Verify pinned tested source before dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$SOURCE_REF" --jq .object.sha)"
+          test "$actual" = "$SOURCE_SHA"
+          state="$(gh workflow view niak-apk-build.yml --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+          test "$state" = active
+          echo "Confirmed both builds will use source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch ARM32 and ARM64 using existing sccache-enabled workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in arm arm64; do
+            gh workflow run niak-apk-build.yml --repo "$GITHUB_REPOSITORY" --ref "$SOURCE_REF" -f "architecture=$arch" -f compile=true
+            echo "Dispatched $arch for pinned source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Full APK builds run separately in parallel. No cache reset and no release overwrite." >> "$GITHUB_STEP_SUMMARY"
