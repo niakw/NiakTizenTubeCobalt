@@ -37,7 +37,9 @@
   function emptyState() { return { hiddenVideos: [], blockedChannels: [], channelNames: {} }; }
   function readState() {
     try {
-      var value = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+      // Do not feed our internal saved preferences back through TizenTube's
+      // late JSON.parse wrapper: it expects a YouTube response payload.
+      var value = nativeParse(window.localStorage.getItem(STORAGE_KEY));
       if (!value || typeof value !== 'object') return emptyState();
       return {
         hiddenVideos: Array.isArray(value.hiddenVideos) ? value.hiddenVideos.filter(function (v) { return typeof v === 'string'; }).slice(-MAX_HIDDEN) : [],
