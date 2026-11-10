@@ -31,6 +31,7 @@ function boot(hostname = 'www.youtube.com') {
   ticks.forEach((fn) => fn());
   return {
     window, storage, outgoing, storageReads: () => storageReads, parse: (data) => vm.runInContext('JSON.parse', context)(JSON.stringify(data)),
+    tick: () => ticks.forEach((fn) => fn()),
     command: (action, parameters) => window._yttv.live.instance.resolveCommand({
       playlistEditEndpoint: { customAction: { action, parameters } }
     })
@@ -323,4 +324,97 @@ test('Live ad markers remain when the user disables the ad blocker', () => {
   assert.equal(output.adSlots.length, 1);
   assert.equal(output.playerAds, true);
   assert.equal(output.streamingData.formats[0].itag, 18);
+});
+
+test('Home video with content ID but no watch command still gets a long-press menu', () => {
+  const app = boot();
+  const item = tile();
+  delete item.tileRenderer.onSelectCommand;
+  const home = { contents: { tvBrowseRenderer: { content: {
+    richGridRenderer: { contents: [{ richItemRenderer: { content: item } }] }
+  } } } };
+  app.window.ytInitialData = home;
+  const items = menuOf(item);
+  assert.ok(actionsOf(items).includes('NIAK_NOT_INTERESTED'));
+  assert.equal(items[0].menuNavigationItemRenderer.navigationEndpoint.watchEndpoint.videoId, VIDEO);
+});
+
+test('Search feedback choices are reused instead of duplicated by the Cobalt extension', () => {
+  const app = boot();
+  const item = tile();
+  const existing = (name, parameters) => ({ menuServiceItemRenderer: {
+    text: { simpleText: name },
+    serviceEndpoint: { playlistEditEndpoint: {
+      customAction: { action: name, parameters }
+    } }
+  } });
+  item.tileRenderer.onLongPressCommand = { showMenuCommand: { menu: { menuRenderer: {
+    items: [
+      existing('NOT_INTERESTED', { panelId: 'native-feedback', params: 'search' }),
+      existing('DONT_RECOMMEND_CHANNEL', { panelId: 'native-feedback', params: 'search' }),
+      existing('NOT_INTERESTED', null),
+      { menuServiceItemRenderer: { text: { simpleText: 'Save' } } }
+    ]
+  } } } };
+  const parsed = app.parse(response([item]));
+  const menu = menuOf(itemsOf(parsed)[0]);
+  const actions = actionsOf(menu);
+  assert.equal(actions.filter((x) => x === 'NIAK_NOT_INTERESTED').length, 1);
+  assert.equal(actions.filter((x) => x === 'NIAK_DONT_RECOMMEND').length, 1);
+  assert.equal(actions.filter((x) => x === 'NOT_INTERESTED').length, 0);
+  assert.equal(actions.filter((x) => x === 'DONT_RECOMMEND_CHANNEL').length, 0);
+  assert.ok(menu.some((x) => x?.menuServiceItemRenderer?.text?.simpleText === 'Save'));
+  const hide = menu.find((x) => x?.menuServiceItemRenderer?.serviceEndpoint
+    ?.playlistEditEndpoint?.customAction?.action === 'NIAK_NOT_INTERESTED');
+  app.window._yttv.live.instance.resolveCommand(hide.menuServiceItemRenderer.serviceEndpoint);
+  assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
+});
+
+test('Niak actions remain active when upstream replaces the command resolver later', () => {
+  const app = boot();
+  const instance = app.window._yttv.live.instance;
+  const original = instance.resolveCommand;
+  let upstreamCalls = 0;
+  // Simulate the main TizenTube userscript installing its handler after startup.
+  instance.resolveCommand = function (command) {
+    upstreamCalls++;
+    if (command.playlistEditEndpoint?.customAction) return true;
+    return original(command);
+  };
+  app.command('NIAK_NOT_INTERESTED', { videoId: VIDEO });
+  assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
+  assert.equal(upstreamCalls, 0, 'Niak actions must bypass upstream swallowing them');
+  instance.resolveCommand({ signalAction: { signal: 'POPUP_BACK' } });
+  assert.equal(upstreamCalls, 1, 'unrelated commands must still reach upstream');
+});
+
+test('Mixed command executors keep non-Niak commands and process local commands once', () => {
+  const app = boot();
+  app.window._yttv.live.instance.resolveCommand({ commandExecutorCommand: { commands: [
+    { playlistEditEndpoint: { customAction: { action: 'NIAK_NOT_INTERESTED',
+      parameters: { videoId: VIDEO } } } },
+    { signalAction: { signal: 'POPUP_BACK' } }
+  ] } });
+  const state = JSON.parse(app.storage.get('niak-tizentube-filters-v1'));
+  assert.deepEqual(state.hiddenVideos, [VIDEO]);
+  assert.equal(app.outgoing.length >= 1, true);
+  const forwarded = app.outgoing[app.outgoing.length - 1];
+  assert.deepEqual(forwarded.commandExecutorCommand.commands.map(x => x.signalAction?.signal),
+    ['POPUP_BACK']);
+});
+
+test('Multiple YouTube TV resolver instances have independent command guards', () => {
+  const app = boot();
+  const extraCommands = [];
+  app.window._yttv.second = { instance: {
+    resolveCommand: (command) => { extraCommands.push(command); return false; }
+  } };
+  app.tick();
+  const extra = app.window._yttv.second.instance;
+  extra.resolveCommand = (command) => { extraCommands.push(command); return false; };
+  extra.resolveCommand({ playlistEditEndpoint: {
+    customAction: { action: 'NIAK_NOT_INTERESTED', parameters: { videoId: VIDEO } }
+  } });
+  assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
+  assert.equal(extraCommands.length, 0);
 });
