@@ -57,8 +57,26 @@ jobs:
           code_base="45e3260bacd401096367110043402e0cfb424d1d"
           tested="$(gh api "repos/$repo/actions/runs/42826168890" --jq .conclusion)"
           test "$tested" = success
+          test "$(gh api "repos/$repo/actions/runs/42843467014" --jq .conclusion)" = success
           changed="$(gh api "repos/$repo/compare/$code_base...main" --jq '.files[].filename')"
-          if grep -Ev '^\.github/workflows/' <<< "$changed" | grep -q .; then
+          if grep -Ev '^\.github/workflows/|^tests/niak_signing_policy\.test\.cjs
+            echo "::error::App code changed since targeted checks. Refusing an untested rebuild."
+            exit 1
+          fi
+          source_sha="$(gh api "repos/$repo/git/ref/heads/main" --jq .object.sha)"
+          existing="$(gh api "repos/$repo/actions/workflows/niak-apk-build.yml/runs?per_page=100&head_sha=$source_sha" --jq .total_count)"
+          if (( existing > 0 )); then
+            echo "::error::An APK workflow already exists for $source_sha; refusing duplicate costly builds."
+            exit 1
+          fi
+          echo "Stable signer verified; dispatching both ABIs from the same main source commit $source_sha."
+          for arch in arm arm64; do
+            test "$(gh api "repos/$repo/git/ref/heads/main" --jq .object.sha)" = "$source_sha"
+            gh workflow run niak-apk-build.yml --repo "$repo" --ref main -f "architecture=$arch" -f compile=true
+            echo "Dispatched owner-signed $arch APK with existing sccache." >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Source revision: $source_sha. No temporary signing certificates." >> "$GITHUB_STEP_SUMMARY"
+ <<< "$changed" | grep -q .; then
             echo "::error::App code changed since targeted checks. Refusing an untested rebuild."
             exit 1
           fi
