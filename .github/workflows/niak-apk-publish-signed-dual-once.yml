@@ -1,0 +1,142 @@
+name: Niak Cobalt — publish existing permanently signed ARM and ARM64 APKs
+
+# One-shot publisher: reuses the two successful, already-built APK artifacts.
+# No GN, Ninja, gclient, sccache reset, signing-key generation or APK compilation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-apk-publish-signed-dual-once.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: niak-cobalt-owner-signed-08ace758-dual-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-dual-verified:
+    if: github.repository == 'niakw/NiakTizenTubeCobalt'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: 08ace758ee49a82e3dd61606dde729b841bf06c7
+      RUN_ARM: '42846676441'
+      RUN_ARM64: '42846682482'
+      CERT_SHA256: ${{ vars.NIAK_COBALT_SIGNING_CERT_SHA256 }}
+      TAG: niak-cobalt-signed-dual-08ace758ee49
+    steps:
+      - name: Check out exact built source, no compile
+        uses: actions/checkout@v4
+        with:
+          ref: 08ace758ee49a82e3dd61606dde729b841bf06c7
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/niak-verify-apk-abi.py
+            scripts/niak-embed-tizentube.sh
+            cobalt/shell/BUILD.gn
+            cobalt/shell/browser/shell.cc
+            .github/workflows/niak-apk-build.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Verify immutable run provenance and available signed artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -n "$CERT_SHA256"
+          grep -Fq 'NIAK_COBALT_SIGNING_KEYSTORE_B64' .github/workflows/niak-apk-build.yml
+          if grep -Fq 'keytool -genkeypair' .github/workflows/niak-apk-build.yml; then
+            echo "::error::Unexpected disposable APK signing"; exit 1
+          fi
+          grep -Fq '9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75' scripts/niak-embed-tizentube.sh
+          grep -Fq niak_tizentube_security_guard.js cobalt/shell/BUILD.gn
+          grep -Fq niak_upstream_tizentube.js cobalt/shell/browser/shell.cc
+          for arch in arm arm64; do
+            case "$arch" in
+              arm) run="$RUN_ARM" ;;
+              arm64) run="$RUN_ARM64" ;;
+            esac
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run")"
+            jq -e --arg sha "$SOURCE_SHA" '
+              .name == "Niak Cobalt — APK builder" and
+              .event == "workflow_dispatch" and
+              .head_branch == "main" and
+              .head_sha == $sha and
+              .status == "completed" and .conclusion == "success"
+            ' <<< "$data" >/dev/null
+            name="niak-cobalt-$arch-$SOURCE_SHA-SIGNED-QA"
+            artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts")"
+            jq -e --arg name "$name" '
+              [.artifacts[] | select(.name == $name and .expired == false)] | length == 1
+            ' <<< "$artifacts" >/dev/null
+            echo "Verified source and immutable artifact for $arch from run $run" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Download both completed APK artifacts and verify signature, ELF ABI, ZIP, SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          signer="$(find "/usr/local/lib/android/sdk/build-tools" "$ANDROID_HOME/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n1)"
+          if [[ -z "$signer" || ! -x "$signer" ]]; then
+            echo "::error::Android apksigner unavailable; refusing unverified publishing."; exit 1
+          fi
+          expected="$(printf '%s' "$CERT_SHA256" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+          if [[ ! "$expected" =~ ^[0-9A-F]{64}$ ]]; then
+            echo "::error::Pinned signing certificate SHA256 malformed."; exit 1
+          fi
+          for arch in arm arm64; do
+            case "$arch" in
+              arm) run="$RUN_ARM" ;;
+              arm64) run="$RUN_ARM64" ;;
+            esac
+            name="niak-cobalt-$arch-$SOURCE_SHA-SIGNED-QA"
+            mkdir -p "verified/$arch"
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "verified/$arch"
+            apk="verified/$arch/$name.apk"
+            test -s "$apk"
+            test -s "$apk.sha256"
+            test "$(stat -c '%s' "$apk")" -gt 10000000
+            actual_sha="$(sha256sum "$apk" | awk '{print $1}')"
+            expected_sha="$(awk 'NR==1 {print $1}' "$apk.sha256")"
+            if [[ "$actual_sha" != "$expected_sha" ]]; then
+              echo "::error::APK SHA-256 mismatch for $arch."; exit 1
+            fi
+            unzip -t "$apk" >/dev/null
+            python3 scripts/niak-verify-apk-abi.py "$apk" "$arch"
+            cert="$("$signer" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1 | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+            if [[ "$cert" != "$expected" ]]; then
+              echo "::error::Wrong signing certificate in $arch APK."; exit 1
+            fi
+            echo "Verified $arch: ZIP, ELF ABI, artifact SHA256 $actual_sha, permanent certificate $cert" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Publish one combined owner-signed QA prerelease (no new build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            for arch in arm arm64; do
+              name="niak-cobalt-$arch-$SOURCE_SHA-SIGNED-QA.apk"
+              gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name" || {
+                echo "::error::Existing release lacks $name; refusing partial or conflicting release."; exit 1;
+              }
+            done
+            echo "Both verified APKs already published in $TAG. No duplicate release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          notes="Permanent owner-signed Android TV QA build (ARM32 + ARM64). Exact binary source revision: $SOURCE_SHA. ARM build run: $RUN_ARM; ARM64 build run: $RUN_ARM64. Both native APKs passed GitHub Actions success, artifact integrity checks, native ELF/ABI validation, APK ZIP integrity, APK certificate verification and comparison with the one pinned owner certificate. The original temporary TEST-signed builds are not included in this release. Initial migration from old temporary TEST or upstream signing keys can require an uninstall, possibly losing local data; future updates with this same key can install in place when Android versionCode permits. Home long-press actions, playback and account sign-in require final physical Android TV testing."
+          gh release create "$TAG" \
+            verified/arm/*.apk verified/arm/*.apk.sha256 \
+            verified/arm64/*.apk verified/arm64/*.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Niak Cobalt Android TV — ARM + ARM64 permanently signed ($SOURCE_SHA)" \
+            --prerelease --notes "$notes"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort
+          echo "Published both signed ABIs, and their SHA256 files, in release $TAG." >> "$GITHUB_STEP_SUMMARY"
