@@ -82,10 +82,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          signer="$(find "/usr/local/lib/android/sdk/build-tools" "$ANDROID_HOME/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n1)"
-          if [[ -z "$signer" || ! -x "$signer" ]]; then
+          signer=""
+          for root in "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" "/usr/local/lib/android/sdk/build-tools"; do
+            if [[ -d "$root" ]]; then
+              candidate="$(find "$root" -type f -name apksigner 2>/dev/null | sort -V | tail -n1)"
+              if [[ -n "$candidate" && -x "$candidate" ]]; then
+                signer="$candidate"
+                break
+              fi
+            fi
+          done
+          if [[ -z "$signer" ]]; then
             echo "::error::Android apksigner unavailable; refusing unverified publishing."; exit 1
           fi
+          echo "Using Android apksigner: $signer"
           expected="$(printf '%s' "$CERT_SHA256" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
           if [[ ! "$expected" =~ ^[0-9A-F]{64}$ ]]; then
             echo "::error::Pinned signing certificate SHA256 malformed."; exit 1
