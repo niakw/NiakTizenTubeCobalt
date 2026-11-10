@@ -43,8 +43,37 @@ jobs:
             echo "The actual public Ubuntu image has a larger volume than the minimum specification."
             echo "A native Cobalt build may now be attempted if cleanup yields sufficient free space."
           } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify the permanent APK signer before permitting native compilation
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.NIAK_COBALT_SIGNING_KEYSTORE_B64 }}
+          CERT_SHA256: ${{ vars.NIAK_COBALT_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_B64" || -z "$CERT_SHA256" ]]; then
+            echo "::error::Permanent signing secret or pinned certificate fingerprint is missing. No native build will run."
+            exit 1
+          fi
+          umask 077
+          keystore="$(mktemp)"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          details="$(keytool -list -v -keystore "$keystore" -storepass android -alias androiddebugkey)"
+          actual="$(grep -m1 'SHA256:' <<< "$details" | cut -d: -f2- | tr -d ' :\\r\\n' | tr '[:lower:]' '[:upper:]')"
+          expected="$(printf '%s' "$CERT_SHA256" | tr -d ' :\\r\\n' | tr '[:lower:]' '[:upper:]')"
+          if [[ -z "$actual" || "$actual" != "$expected" ]]; then
+            echo "::error::Permanent signer does not match pinned certificate fingerprint. No native build will run."
+            exit 1
+          fi
+          echo "Permanent owner certificate verified before native build: $actual" >> "$GITHUB_STEP_SUMMARY"
 
   native-apk:
+    needs: runner-capacity
     if: inputs.compile
     runs-on: ubuntu-24.04
     timeout-minutes: 360
