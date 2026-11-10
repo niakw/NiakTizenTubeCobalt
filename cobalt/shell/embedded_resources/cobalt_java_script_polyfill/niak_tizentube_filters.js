@@ -69,9 +69,38 @@
     }
     return null;
   }
+  // Home recommendations can wrap the real watch command in another endpoint.
+  // Only unwrap explicit watch commands, never channel/playlist navigation.
+  function watchNavigation(command, depth) {
+    if (!command || typeof command !== 'object' || depth > 4) return null;
+    if (command.watchEndpoint && typeof command.watchEndpoint.videoId === 'string') return command;
+    var nested = command.innertubeCommand || command.navigationEndpoint;
+    if (nested) {
+      var match = watchNavigation(nested, depth + 1);
+      if (match) return match;
+    }
+    var commands = command.commandExecutorCommand && command.commandExecutorCommand.commands;
+    if (Array.isArray(commands)) {
+      for (var i = 0; i < commands.length && i < 8; i++) {
+        var found = watchNavigation(commands[i], depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  function videoNavigation(item) {
+    var t = item && item.tileRenderer, l = item && item.lockupViewModel;
+    return watchNavigation(t ? t.onSelectCommand :
+      l && l.rendererContext && l.rendererContext.commandContext &&
+      l.rendererContext.commandContext.onTap, 0);
+  }
   function videoId(item) {
     var id = item && (item.tileRenderer && item.tileRenderer.contentId ||
       item.lockupViewModel && item.lockupViewModel.contentId);
+    if (!(typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id))) {
+      var navigation = videoNavigation(item);
+      id = navigation && navigation.watchEndpoint.videoId;
+    }
     return typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
   }
   function channelInfo(item) {
@@ -126,8 +155,12 @@
     return /FElibrary|FEhistory|FEplaylist|\/playlist|[?&]list=/i.test(window.location.hash || '');
   }
   function isVideo(item) {
-    return !!(item && (item.tileRenderer && item.tileRenderer.style === 'TILE_STYLE_YTLR_DEFAULT' ||
-      item.lockupViewModel && item.lockupViewModel.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO'));
+    if (!item) return false;
+    var t = item.tileRenderer, l = item.lockupViewModel;
+    return !!(t && (t.style === 'TILE_STYLE_YTLR_DEFAULT' ||
+        (videoId(item) && videoNavigation(item))) ||
+      l && (l.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO' ||
+        (!l.contentType && videoId(item) && videoNavigation(item))));
   }
   function isBlocked(item, state) {
     if (!isVideo(item)) return false;
@@ -173,16 +206,14 @@
     var t = item.tileRenderer, l = item.lockupViewModel;
     var cmd = t ? t.onLongPressCommand :
       l.rendererContext && l.rendererContext.commandContext &&
-      l.rendererContext.commandContext.onLongPress &&
-      l.rendererContext.commandContext.onLongPress.innertubeCommand;
+      l.rendererContext.commandContext.onLongPress;
+    if (cmd && cmd.innertubeCommand) cmd = cmd.innertubeCommand;
     if (cmd && cmd.showMenuCommand && cmd.showMenuCommand.menu &&
       cmd.showMenuCommand.menu.menuRenderer && Array.isArray(cmd.showMenuCommand.menu.menuRenderer.items)) {
       return cmd.showMenuCommand.menu.menuRenderer.items;
     }
-    var id = videoId(item), navigation = t ? t.onSelectCommand :
-      l.rendererContext && l.rendererContext.commandContext && l.rendererContext.commandContext.onTap &&
-      l.rendererContext.commandContext.onTap.innertubeCommand;
-    if (!id || !navigation || !navigation.watchEndpoint) return null;
+    var id = videoId(item), navigation = videoNavigation(item);
+    if (!id || !navigation) return null;
     var items = [{ menuNavigationItemRenderer: {
       text: { runs: [{ text: fr ? 'Lire' : 'Play' }] },
       navigationEndpoint: navigation, trackingParams: null
@@ -252,8 +283,10 @@
     var blockAds = adBlockingEnabled();
     var seen = new WeakSet(), count = 0;
     function walk(obj, depth) {
-      if (!obj || typeof obj !== 'object' || seen.has(obj) || depth > 22 || ++count > 3000) return;
+      if (!obj || typeof obj !== 'object' || seen.has(obj) || depth > 22 || ++count > 6000) return;
       seen.add(obj);
+      // Home can wrap video tiles in richItemRenderer rather than the usual list.
+      if (isVideo(obj)) decorateMenu(obj);
       if (obj.sectionListRenderer && Array.isArray(obj.sectionListRenderer.contents) &&
           blockAds && !exemptions()) {
         obj.sectionListRenderer.contents =
@@ -311,7 +344,9 @@
         source.indexOf('"horizontalListRenderer"') === -1 &&
         source.indexOf('"gridRenderer"') === -1 &&
         source.indexOf('"horizontalListContinuation"') === -1 &&
-        source.indexOf('"gridContinuation"') === -1) return data;
+        source.indexOf('"gridContinuation"') === -1 &&
+         source.indexOf('"tileRenderer"') === -1 &&
+         source.indexOf('"lockupViewModel"') === -1) return data;
     try { decoratePayload(data); }
     catch (error) { console.warn('Niak filters: unable to process recommendations', error); }
     return data;
@@ -464,6 +499,30 @@
       instance.resolveCommand = wrapped;
     }
   }
+  // The first Home feed may be supplied as a pre-parsed global, unlike
+  // subsequent network responses handled by JSON.parse.
+  // Leave pre-existing accessors or non-configurable globals alone.
+  function installInitialFeedHook() {
+    var descriptor = Object.getOwnPropertyDescriptor(window, 'ytInitialData');
+    if (descriptor && (!descriptor.configurable || !descriptor.writable ||
+        descriptor.get || descriptor.set)) return;
+    var initialData = descriptor ? descriptor.value : undefined;
+    try {
+      Object.defineProperty(window, 'ytInitialData', {
+        configurable: true, enumerable: descriptor ? descriptor.enumerable : true,
+        get: function () { return initialData; },
+        set: function (data) {
+          try { decoratePayload(data); }
+          catch (error) { console.warn('Niak filters: initial Home feed unavailable', error); }
+          initialData = data;
+        }
+      });
+      if (initialData) decoratePayload(initialData);
+    } catch (error) {
+      console.warn('Niak filters: initial Home hook unavailable', error);
+    }
+  }
+  installInitialFeedHook();
   installCommandPatch();
   // Some YouTube TV builds replace their command resolver after boot/navigation.
   window.setInterval(installCommandPatch, 1500);
