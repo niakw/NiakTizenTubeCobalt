@@ -158,11 +158,14 @@
   function isVideo(item) {
     if (!item) return false;
     var t = item.tileRenderer, l = item.lockupViewModel;
-    return !!(t && (t.style === 'TILE_STYLE_YTLR_DEFAULT' ||
-        (videoId(item) && (videoNavigation(item) || t.style === 'TILE_STYLE_YTLR_FEATURED' ||
-          t.contentType === 'VIDEO'))) ||
-      l && (l.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO' ||
-        (!l.contentType && videoId(item) && videoNavigation(item))));
+    // Home uses many styles of video tile, not just DEFAULT and FEATURED.
+    // A valid watch/video ID is stronger evidence than any presentation style.
+    // Explicit channel, playlist and mix cards must still remain untouched.
+    if (!videoId(item)) return false;
+    var type = (t && t.contentType || l && l.contentType || '');
+    if (typeof type === 'string' && /CHANNEL|PLAYLIST|COLLECTION|MIX/i.test(type))
+      return false;
+    return !!(t || l);
   }
   function isBlocked(item, state) {
     if (!isVideo(item)) return false;
