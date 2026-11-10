@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           actual="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$SOURCE_REF" --jq .object.sha)"
           test "$actual" = "$SOURCE_SHA"
-          state="$(gh workflow view niak-apk-build.yml --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+          state="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/niak-apk-build.yml" --jq .state)"
           test "$state" = active
           echo "Confirmed both builds will use source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Dispatch ARM32 and ARM64 using existing sccache-enabled workflow
