@@ -511,9 +511,9 @@ test('Later TizenTube JSON.parse processing cannot reintroduce duplicate feedbac
   assert.equal(localActions.filter(x => x === 'NIAK_DONT_RECOMMEND').length, 1);
   assert.equal(localActions.includes('NOT_INTERESTED'), false);
   assert.equal(localActions.includes('DONT_RECOMMEND_CHANNEL'), false);
-  const endpoint = menu.find(x => x?.menuServiceItemRenderer?.serviceEndpoint
-    ?.customAction?.action === 'NIAK_NOT_INTERESTED')
-    ?.menuServiceItemRenderer?.serviceEndpoint;
+  const endpoint = menu.map(x => x?.menuServiceItemRenderer?.serviceEndpoint).find(e =>
+    e?.customAction?.action === 'NIAK_NOT_INTERESTED' ||
+    e?.playlistEditEndpoint?.customAction?.action === 'NIAK_NOT_INTERESTED');
   assert.ok(endpoint);
   app.window._yttv.live.instance.resolveCommand(endpoint);
   assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
