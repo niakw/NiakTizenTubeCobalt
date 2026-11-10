@@ -1,0 +1,48 @@
+name: Niak Cobalt — one-shot permanent APK signer preflight
+
+# Triggered only by the initial addition of this workflow to main.
+# NO Cobalt sync, APK build, release or temporary signing key.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-signer-preflight-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-permanent-signer:
+    if: github.repository == 'niakw/NiakTizenTubeCobalt'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Require existing owner-managed signer and pinned SHA-256
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.NIAK_COBALT_SIGNING_KEYSTORE_B64 }}
+          CERT_SHA256: ${{ vars.NIAK_COBALT_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_B64" || -z "$CERT_SHA256" ]]; then
+            echo "::error::Missing persistent signing keystore secret or pinned certificate variable. Zero native builds launched."
+            exit 1
+          fi
+          umask 077
+          keystore="$(mktemp)"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          details="$(keytool -list -v -keystore "$keystore" -storepass android -alias androiddebugkey)"
+          actual="$(sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' <<< "$details" | head -n1 | tr -d ' :\r\n' | tr '[:lower:]' '[:upper:]')"
+          expected="$(printf '%s' "$CERT_SHA256" | tr -d ' :\r\n' | tr '[:lower:]' '[:upper:]')"
+          if [[ -z "$actual" || "$actual" != "$expected" ]]; then
+            echo "::error::Keystore certificate does not match the pinned fingerprint. Zero native builds launched."
+            exit 1
+          fi
+          echo "Permanent Android APK signing certificate verified." >> "$GITHUB_STEP_SUMMARY"
+          echo "Keystore alias and fixed password validated. No APK compiled and no certificate generated." >> "$GITHUB_STEP_SUMMARY"
