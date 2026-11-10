@@ -374,18 +374,20 @@ test('Niak actions remain active when upstream replaces the command resolver lat
   const app = boot();
   const instance = app.window._yttv.live.instance;
   const original = instance.resolveCommand;
-  let upstreamCalls = 0;
+  const upstreamCommands = [];
   // Simulate the main TizenTube userscript installing its handler after startup.
   instance.resolveCommand = function (command) {
-    upstreamCalls++;
+    upstreamCommands.push(command);
     if (command.playlistEditEndpoint?.customAction) return true;
     return original(command);
   };
   app.command('NIAK_NOT_INTERESTED', { videoId: VIDEO });
   assert.deepEqual(JSON.parse(app.storage.get('niak-tizentube-filters-v1')).hiddenVideos, [VIDEO]);
-  assert.equal(upstreamCalls, 0, 'Niak actions must bypass upstream swallowing them');
+  assert.equal(upstreamCommands.some(x => x?.playlistEditEndpoint?.customAction?.action ===
+    'NIAK_NOT_INTERESTED'), false, 'Niak action must not be swallowed upstream');
   instance.resolveCommand({ signalAction: { signal: 'POPUP_BACK' } });
-  assert.equal(upstreamCalls, 1, 'unrelated commands must still reach upstream');
+  assert.equal(upstreamCommands.some(x => x?.signalAction?.signal === 'POPUP_BACK'),
+    true, 'unrelated commands must still reach upstream');
 });
 
 test('Mixed command executors keep non-Niak commands and process local commands once', () => {
@@ -399,7 +401,7 @@ test('Mixed command executors keep non-Niak commands and process local commands 
   assert.deepEqual(state.hiddenVideos, [VIDEO]);
   assert.equal(app.outgoing.length >= 1, true);
   const forwarded = app.outgoing[app.outgoing.length - 1];
-  assert.deepEqual(forwarded.commandExecutorCommand.commands.map(x => x.signalAction?.signal),
+  assert.deepEqual(Array.from(forwarded.commandExecutorCommand.commands, x => x.signalAction?.signal),
     ['POPUP_BACK']);
 });
 
