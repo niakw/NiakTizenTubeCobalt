@@ -21,7 +21,10 @@ test('native builder requires an owner-controlled certificate before native comp
 
 test('publisher only accepts owner-signed QA artifact names', () => {
   assert.ok(publisher.includes('NIAK_COBALT_SIGNING_KEYSTORE_B64'));
-  assert.ok(publisher.includes('niak-cobalt-*-SIGNED-QA'));
+  assert.ok(publisher.includes('artifact_name="niak-cobalt-$arch-$SOURCE_SHA-SIGNED-QA"'));
+  assert.ok(publisher.includes('for arch in arm arm64; do'));
+  assert.ok(publisher.includes('run_ids[arm]:-') && publisher.includes('run_ids[arm64]:-'));
+  assert.ok(publisher.includes('expected_cert') && publisher.includes('gh release create'));
   assert.ok(publisher.includes('-SIGNED-QA.apk'));
   assert.ok(!publisher.includes("--pattern 'niak-cobalt-*-TEST'"));
 });
