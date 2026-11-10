@@ -1,4 +1,4 @@
-name: Niak Cobalt — verified test APK prerelease
+name: Niak Cobalt — owner-signed QA APK prerelease
 
 on:
   workflow_run:
@@ -10,7 +10,7 @@ permissions:
   actions: read
 
 jobs:
-  publish-test:
+  publish-signed-qa:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -25,6 +25,7 @@ jobs:
             scripts/niak-verify-apk-abi.py
             cobalt/shell/BUILD.gn
             cobalt/shell/browser/shell.cc
+            .github/workflows/niak-apk-build.yml
           sparse-checkout-cone-mode: false
       - name: Refuse a release without pinned main userscript and security guard
         id: provenance
@@ -34,7 +35,9 @@ jobs:
           if grep -q '9bdf8d414e1282c5ada05cae7bf4d1a53871c905c123e00e4543dbeb7c584c75' scripts/niak-embed-tizentube.sh \
               && grep -q 'niak_upstream_tizentube.js' cobalt/shell/BUILD.gn \
               && grep -q 'niak_tizentube_security_guard.js' cobalt/shell/BUILD.gn \
-              && grep -q 'niak_upstream_tizentube.js' cobalt/shell/browser/shell.cc; then
+              && grep -q 'niak_upstream_tizentube.js' cobalt/shell/browser/shell.cc \
+              && grep -q 'NIAK_COBALT_SIGNING_KEYSTORE_B64' .github/workflows/niak-apk-build.yml \
+              && ! grep -q 'keytool -genkeypair' .github/workflows/niak-apk-build.yml; then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
@@ -50,9 +53,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/apks"
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'niak-cobalt-*-TEST' --dir "$GITHUB_WORKSPACE/apks"
-          mapfile -t apks < <(find "$GITHUB_WORKSPACE/apks" -type f -name '*-TEST.apk')
-          (( ${#apks[@]} == 1 )) || { echo 'Expected exactly one genuine test APK'; exit 1; }
+            --pattern 'niak-cobalt-*-SIGNED-QA' --dir "$GITHUB_WORKSPACE/apks"
+          mapfile -t apks < <(find "$GITHUB_WORKSPACE/apks" -type f -name '*-SIGNED-QA.apk')
+          (( ${#apks[@]} == 1 )) || { echo 'Expected exactly one genuine signed QA APK'; exit 1; }
           test "$(stat -c '%s' "${apks[0]}")" -gt 10000000
           test -f "${apks[0]}.sha256"
           expected=$(awk '{print $1}' "${apks[0]}.sha256")
@@ -61,13 +64,13 @@ jobs:
           unzip -t "${apks[0]}" | tail -1
           # Validate native ELF class and ABI from APK, independently of build logs.
           case "$(basename "${apks[0]}")" in
-            niak-cobalt-arm64-*-TEST.apk) arch=arm64 ;;
-            niak-cobalt-arm-*-TEST.apk) arch=arm ;;
+            niak-cobalt-arm64-*-SIGNED-QA.apk) arch=arm64 ;;
+            niak-cobalt-arm-*-SIGNED-QA.apk) arch=arm ;;
             *) echo "Unknown APK architecture naming"; exit 1 ;;
           esac
           python3 scripts/niak-verify-apk-abi.py "${apks[0]}" "$arch"
           echo "Artifact SHA-256 and native $arch ABI verified: $actual"
-      - name: Publish explicit test prerelease only
+      - name: Publish owner-signed QA prerelease only
         if: steps.provenance.outputs.eligible == 'true'
         shell: bash
         env:
@@ -77,12 +80,12 @@ jobs:
         run: |
           set -euo pipefail
           short="${SOURCE_SHA:0:12}"
-          tag="niak-cobalt-test-$RUN_ID"
-          mapfile -t files < <(find "$GITHUB_WORKSPACE/apks" -type f \( -name '*-TEST.apk' -o -name '*-TEST.apk.sha256' \))
+          tag="niak-cobalt-signed-qa-$RUN_ID"
+          mapfile -t files < <(find "$GITHUB_WORKSPACE/apks" -type f \( -name '*-SIGNED-QA.apk' -o -name '*-SIGNED-QA.apk.sha256' \))
           (( ${#files[@]} == 2 )) || exit 1
           gh release create "$tag" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Niak Cobalt Android TEST — $short" \
+            --title "Niak Cobalt Android signed QA — $short" \
             --prerelease \
-            --notes "TEST BUILD ONLY (not a stable production release). Exact binary source revision: $SOURCE_SHA (successful build run $RUN_ID); release tag points at $GITHUB_SHA only for GitHub Actions workflow-token compatibility. Contains pinned GPL TizenTube userscript, local filters and security guard. Debug signature differs from the original TizenTube publisher; Android may require removal of the official package and app data may be lost. Native APK integrity and signature checks passed in CI, but startup/login/remote/video playback have NOT been verified on a TV. Do not use as an automatic update."
+            --notes "OWNER-SIGNED QA BUILD (not yet device-validated). Exact source revision: $SOURCE_SHA, successful run $RUN_ID (the tag may reference workflow revision $GITHUB_SHA for GitHub token compatibility). The APK was compiled with the single permanent Niak signing key stored in a GitHub Actions secret, pinned to a public certificate SHA-256 fingerprint; ABI, binary digest and APK signer were verified at build. Subsequent Niak-signed APKs with this same certificate can update in place if Android versionCode allows. This is NOT the original TizenTube publisher signature, and cannot update official or earlier ephemeral TEST APKs without reinstallation. Real Android TV navigation, login and playback still require physical validation."
