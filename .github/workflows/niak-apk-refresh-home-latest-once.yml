@@ -1,0 +1,164 @@
+name: Niak Cobalt — refresh latest TEST release with verified dual-ABI Home fix
+
+# One-shot, artifact-only release update. No Cobalt compilation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/niak-apk-refresh-home-latest-once.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: niak-cobalt-refresh-latest-home-20261110
+  cancel-in-progress: false
+
+jobs:
+  update-release:
+    if: github.repository == 'niakw/NiakTizenTubeCobalt'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: niak-cobalt-test-42701798360
+      RELEASE_ID: '440150867'
+      SOURCE_SHA: a2c824c479d085b1b477f47963ea4e44fa880549
+      SOURCE_BRANCH: build/home-longpress-20261110
+      ARM_RUN: '42798597317'
+      ARM64_RUN: '42798602668'
+      OLD_ARM: niak-cobalt-arm-fe1005f5518a-TEST.apk
+    steps:
+      - name: Checkout exact verified source for ABI validator
+        uses: actions/checkout@v4
+        with:
+          ref: a2c824c479d085b1b477f47963ea4e44fa880549
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/niak-verify-apk-abi.py
+            cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js
+          sparse-checkout-cone-mode: false
+
+      - name: Pin latest existing TEST release and both successful immutable build runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          grep -Fq 'installInitialFeedHook' cobalt/shell/embedded_resources/cobalt_java_script_polyfill/niak_tizentube_filters.js
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          test "$(jq -r .tag_name <<< "$release")" = "$TAG"
+          test "$(jq -r .prerelease <<< "$release")" = true
+          test "$(jq -r .draft <<< "$release")" = false
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" --jq '.[0].id')"
+          test "$latest" = "$RELEASE_ID" || {
+            echo "::error::A newer release exists; refusing to modify an older release"; exit 1;
+          }
+          for arch in arm arm64; do
+            case "$arch" in
+              arm) run="$ARM_RUN" ;;
+              arm64) run="$ARM64_RUN" ;;
+            esac
+            json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run")"
+            test "$(jq -r .status <<< "$json")" = completed
+            test "$(jq -r .conclusion <<< "$json")" = success
+            test "$(jq -r .head_sha <<< "$json")" = "$SOURCE_SHA"
+            test "$(jq -r .head_branch <<< "$json")" = "$SOURCE_BRANCH"
+            test "$(jq -r .event <<< "$json")" = workflow_dispatch
+            test "$(jq -r .name <<< "$json")" = 'Niak Cobalt — APK builder'
+            artifact_name="niak-cobalt-$arch-$SOURCE_SHA-TEST"
+            count="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts" --jq ".artifacts | map(select(.name == \"$artifact_name\" and .expired == false)) | length")"
+            test "$count" = 1
+          done
+
+      - name: Download without recompilation and independently verify both APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in arm arm64; do
+            case "$arch" in
+              arm) run="$ARM_RUN" ;;
+              arm64) run="$ARM64_RUN" ;;
+            esac
+            name="niak-cobalt-$arch-a2c824c479d0-TEST.apk"
+            mkdir -p "input/$arch"
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" \
+              --pattern "niak-cobalt-$arch-$SOURCE_SHA-TEST" --dir "input/$arch"
+            mapfile -t found < <(find "input/$arch" -type f -name "$name")
+            test "${#found[@]}" -eq 1
+            apk="${found[0]}"
+            test -s "$apk.sha256"
+            test "$(awk 'NR==1 {print $1}' "$apk.sha256")" = "$(sha256sum "$apk" | awk '{print $1}')"
+            test "$(stat -c '%s' "$apk")" -gt 10000000
+            python3 scripts/niak-verify-apk-abi.py "$apk" "$arch"
+            unzip -t "$apk" | tail -1
+            signer="$(command -v apksigner || find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name apksigner | sort -V | tail -1)"
+            test -x "$signer"
+            "$signer" verify --print-certs "$apk" | tee "signer-$arch.txt"
+            grep -Fq 'CN=Niak Cobalt TEST' "signer-$arch.txt"
+            cp "$apk" "$apk.sha256" dist/
+            echo "$arch ($run): $(sha256sum "$apk" | awk '{print $1}')" >> "$GITHUB_STEP_SUMMARY"
+          done
+          test "$(find dist -maxdepth 1 -name '*.apk' | wc -l)" -eq 2
+          test "$(find dist -maxdepth 1 -name '*.sha256' | wc -l)" -eq 2
+
+      - name: Add both new APKs and checksums before removing obsolete files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in dist/*; do
+            filename="$(basename "$f")"
+            expected="sha256:$(sha256sum "$f" | awk '{print $1}')"
+            existing="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq ".assets[] | select(.name == \"$filename\") | .digest")"
+            if [[ -n "$existing" ]]; then
+              test "$existing" = "$expected"
+            else
+              gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY"
+            fi
+            actual="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq ".assets[] | select(.name == \"$filename\") | .digest")"
+            test "$actual" = "$expected"
+          done
+
+      - name: Remove old ARM APK only after proving both replacements are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in "$OLD_ARM" "$OLD_ARM.sha256"; do
+            exists="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq ".assets[] | select(.name == \"$name\") | .id")"
+            if [[ -n "$exists" ]]; then
+              gh release delete-asset "$TAG" "$name" --repo "$GITHUB_REPOSITORY" --yes
+            fi
+          done
+
+      - name: Update TEST release notes and verify exact dual-ABI contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.txt <<EOF
+          TEST BUILD ONLY — not a stable production release.
+
+          This existing prerelease has been refreshed with TWO Android TV APKs from the SAME source commit:
+          - ARM 32-bit (armeabi-v7a): build run $ARM_RUN
+          - ARM64 (arm64-v8a): build run $ARM64_RUN
+          - Actual compiled source SHA: $SOURCE_SHA
+          - Fix: long-press menu works on the Home screen, in addition to other screens.
+
+          Both APKs passed their GitHub Actions builds, embedded ELF ABI checks, ZIP integrity, SHA-256 validation, and test signing checks. The published assets include separate SHA-256 files. No additional native compilation was performed for this release refresh.
+
+          Choose the APK matching your Android TV OS ABI, not only the processor hardware. Test builds use temporary debug signing keys, potentially different between ARM and ARM64 and from previous APKs. An existing installation may need to be removed first, losing local data; this is NOT an in-place update and does not use the official publisher signature.
+
+          TV startup, login, long-press interaction, and video playback are not yet physically validated. The original release tag is retained for link compatibility and points at an older workflow commit; the real binary provenance is the source SHA and run IDs above.
+          EOF
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title 'Niak Cobalt Android TV ARM + ARM64 — Home menu fix — TEST' \
+            --prerelease --notes-file release-notes.txt
+          names="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.assets[].name')"
+          test "$(grep -c -- '-TEST\.apk$' <<< "$names")" -eq 2
+          test "$(grep -c -- '-TEST\.apk\.sha256$' <<< "$names")" -eq 2
+          ! grep -Fq "$OLD_ARM" <<< "$names"
+          grep -Fq 'niak-cobalt-arm-a2c824c479d0-TEST.apk' <<< "$names"
+          grep -Fq 'niak-cobalt-arm64-a2c824c479d0-TEST.apk' <<< "$names"
+          echo "Updated existing TEST prerelease $TAG with both verified APKs and SHA-256 sidecars:" >> "$GITHUB_STEP_SUMMARY"
+          echo "$names" >> "$GITHUB_STEP_SUMMARY"
