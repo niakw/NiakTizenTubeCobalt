@@ -439,7 +439,8 @@
     resolveUi(cmd);
   }
   function sendYoutubeFeedback(panel, index) {
-    if (!panel) return;
+    if (!panel || typeof panel.panelId !== 'string' ||
+        typeof panel.params !== 'string') return;
     try {
       var yttv = window._yttv;
       if (!yttv) return;
@@ -592,6 +593,21 @@
   }
   installInitialFeedHook();
   installCommandPatch();
-  // Some YouTube TV builds replace their command resolver after boot/navigation.
-  window.setInterval(installCommandPatch, 1500);
+  var lastInitialFeed = null;
+  function inspectInitialFeed() {
+    // Some clients expose ytInitialData through a non-configurable getter, or
+    // replace it after our document-start hook. Never overwrite those globals.
+    try {
+      var data = window.ytInitialData;
+      if (data && typeof data === 'object' && data !== lastInitialFeed) {
+        decoratePayload(data);
+        lastInitialFeed = data;
+      }
+    } catch (error) { console.warn('Niak filters: Home feed inspection unavailable', error); }
+  }
+  inspectInitialFeed();
+  window.setInterval(function () {
+    installCommandPatch();
+    inspectInitialFeed();
+  }, 1500);
 })();
