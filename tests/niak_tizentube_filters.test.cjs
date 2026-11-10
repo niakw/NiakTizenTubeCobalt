@@ -481,8 +481,9 @@ test('Later TizenTube JSON.parse processing cannot reintroduce duplicate feedbac
   // TizenTube's pinned adblock.js assigns a second JSON.parse after document start.
   // Its restoreFeedbackMenuItems appends feedback items after the first parser.
   app.window.JSON.parse = function () {
-    upstreamParses++;
     const data = previous.apply(this, arguments);
+    if (!data?.contents?.tvBrowseRenderer) return data;
+    upstreamParses++;
     const item = itemsOf(data)[0];
     // The real upstream addLongPress creates the menu before inserting actions.
     if (!item.tileRenderer.onLongPressCommand) item.tileRenderer.onLongPressCommand = {
